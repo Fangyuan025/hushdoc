@@ -248,7 +248,7 @@ st.title("\U0001F4DA Local PDF RAG Assistant")
 st.caption("Offline RAG over your PDFs — Docling + ChromaDB + llama.cpp + LangChain.")
 
 # Render past messages.
-for i, msg in enumerate(st.session_state.messages):
+for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("sources"):
@@ -260,22 +260,6 @@ for i, msg in enumerate(st.session_state.messages):
                         label += f" — {meta['headings']}"
                     st.markdown(label)
                     st.markdown(f"> {s.get('snippet', '')}")
-        # Only the LAST assistant message gets clickable follow-up chips;
-        # earlier suggestions are stale once the conversation moves on.
-        if (
-            msg["role"] == "assistant"
-            and i == len(st.session_state.messages) - 1
-            and msg.get("suggestions")
-        ):
-            st.caption("✨ Suggested follow-ups:")
-            cols = st.columns(min(3, len(msg["suggestions"])))
-            for j, q in enumerate(msg["suggestions"][:3]):
-                if cols[j % len(cols)].button(
-                    q, key=f"sugg_{i}_{j}", use_container_width=True,
-                ):
-                    # Re-inject as the next user message via session state.
-                    st.session_state["__pending_prompt__"] = q
-                    st.rerun()
 
 # Tiny scope indicator so users understand what each query will search.
 _indexed = _list_indexed_filenames()
@@ -290,10 +274,8 @@ if _indexed:
 else:
     st.caption("\U0001F4C2 No documents indexed yet — upload a PDF to start.")
 
-# Input. A pending suggestion-chip click is replayed as if the user typed it.
+# Input.
 prompt = st.chat_input("Ask a question about your PDFs...")
-if not prompt and st.session_state.get("__pending_prompt__"):
-    prompt = st.session_state.pop("__pending_prompt__")
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -391,21 +373,8 @@ if prompt:
             with st.expander("Standalone search query"):
                 st.code(result.get("standalone_question", ""))
 
-        # Suggested follow-up questions: 3 short, document-anchored prompts
-        # the user might naturally ask next. Hidden during chitchat turns.
-        suggestions: List[str] = []
-        if not result.get("chitchat") and answer:
-            try:
-                suggestions = chain.suggest_followups(
-                    last_question=prompt,
-                    last_answer=answer,
-                )
-            except Exception:
-                logger.exception("Failed to generate follow-up suggestions")
-
         st.session_state.messages.append({
             "role": "assistant",
             "content": answer,
             "sources": sources_payload,
-            "suggestions": suggestions,
         })

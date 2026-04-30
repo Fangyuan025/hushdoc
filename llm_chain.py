@@ -167,36 +167,18 @@ ANSWER_PROMPT = ChatPromptTemplate.from_messages(
         (
             "human",
             "Context:\n----------\n{context}\n----------\n\n"
-            "Question: {question}\n\nAnswer:",
+            "Question: {question}\n\n"
+            # Last-line language directive. Putting it immediately before
+            # 'Answer:' makes it the most recent instruction the model sees
+            # and reliably overrides drift toward the context's language
+            # (the source PDFs are usually English even when the question
+            # is Chinese).
+            "{language_directive}\n"
+            "Answer:",
         ),
     ]
 )
 
-# Suggestion generator — produces 3 short follow-up questions a user might
-# naturally ask next, given the previous Q+A and the documents in scope.
-SUGGESTIONS_SYSTEM = (
-    QWEN3_NO_THINK + "\n"
-    "Suggest 3 short follow-up questions the user might naturally ask next, "
-    "based on the most recent Q+A and the documents available. "
-    "Output each question on its own line, no numbering, no bullets, no "
-    "preamble. Each question must be answerable from the documents the "
-    "user is already working with. Match the language the user is using "
-    "(Chinese for Chinese conversations, English for English). "
-    "Each question should be under 15 words."
-)
-
-SUGGESTIONS_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system", SUGGESTIONS_SYSTEM),
-        (
-            "human",
-            "Documents available:\n{documents_overview}\n\n"
-            "Most recent Q: {question}\n"
-            "Most recent A: {answer}\n\n"
-            "Three follow-up questions:",
-        ),
-    ]
-)
 
 # Conversational fallback prompt for greetings / meta-questions / chitchat
 # where doing a vector search would be silly. Reply in the user's language.
@@ -217,7 +199,7 @@ CHITCHAT_PROMPT = ChatPromptTemplate.from_messages(
     [
         ("system", CHITCHAT_SYSTEM),
         MessagesPlaceholder("chat_history"),
-        ("human", "{question}"),
+        ("human", "{question}\n\n{language_directive}"),
     ]
 )
 
@@ -226,6 +208,41 @@ CHITCHAT_PROMPT = ChatPromptTemplate.from_messages(
 # Chitchat detector — short messages that match a greeting / thanks / meta
 # pattern in CN or EN, and shouldn't trigger document retrieval.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Language detection — decides which language directive to inject per turn.
+# ---------------------------------------------------------------------------
+# CJK ranges: CJK Unified Ideographs (most Chinese), plus Extension A.
+# Hiragana/Katakana intentionally NOT included - we treat Japanese as 'other'.
+_CJK_RE = re.compile(r"[一-鿿㐀-䶿]")
+
+
+def detect_language(text: str) -> str:
+    """Return 'zh' if the text contains a meaningful proportion of CJK
+    characters, else 'en'. Used to pick the per-turn language directive."""
+    if not text:
+        return "en"
+    cjk = sum(1 for ch in text if _CJK_RE.match(ch))
+    # Even a few CJK chars in a short message means the user is writing
+    # Chinese (e.g. '为什么？' is 3 chars). Threshold: >= 2 CJK chars OR
+    # >= 30% of non-whitespace chars are CJK.
+    nonspace = sum(1 for ch in text if not ch.isspace())
+    if cjk >= 2 or (nonspace > 0 and cjk / nonspace >= 0.3):
+        return "zh"
+    return "en"
+
+
+def language_directive(lang: str) -> str:
+    """The last-line instruction we splice into prompts. Designed to be the
+    most recent token the model reads, since trailing instructions tend to
+    win over earlier system-prompt-level ones in small models."""
+    if lang == "zh":
+        return (
+            "IMPORTANT: 必须用中文回答。即使上下文是英文，回答也必须是中文。"
+            "Reply in Chinese only."
+        )
+    return "Reply in English."
+
+
 # Two pattern groups:
 #   STRICT  — unambiguously chitchat (greetings, thanks, farewells, identity
 #             questions). These short-circuit retrieval regardless of history.
@@ -233,18 +250,27 @@ CHITCHAT_PROMPT = ChatPromptTemplate.from_messages(
 #             chitchat ONLY when there's no chat history; with history they
 #             are follow-ups that need retrieval-with-rewrite.
 _CHITCHAT_STRICT_PATTERNS = [
-    # English greetings / thanks / farewells
-    r"^\s*(hi|hello|hey|yo|sup|good\s+(morning|afternoon|evening|night))\b",
-    r"^\s*(thanks|thank\s+you|thx|cheers|bye|goodbye|see\s+you|nice\s+to\s+meet)\b",
+    # English greetings (with or without "good"). Trailing punctuation OK.
+    r"^\s*(hi|hello|hey|yo|sup|hiya|howdy)\b",
+    r"^\s*(good\s+)?(morning|afternoon|evening|night|day)\b",
+    r"^\s*mornin'?\b",
+    # English thanks / farewells
+    r"^\s*(thanks|thank\s+you|thx|ty|cheers|bye|goodbye|see\s+you|nice\s+to\s+meet)\b",
     r"^\s*(how\s+are\s+you|how's\s+it\s+going|what'?s?\s+up|how\s+do\s+you\s+do)\b",
     # English identity / capability questions
     r"^\s*(who\s+are\s+you|what\s+(are\s+you|can\s+you\s+do|do\s+you\s+do)|what\s+is\s+this)\b",
     r"^\s*(introduce\s+yourself|tell\s+me\s+about\s+yourself|please\s+introduce)\b",
     r"^\s*(help|what\s+(should|can)\s+i\s+(do|ask)|how\s+do\s+i\s+use\s+(this|you))\b",
-    # Chinese greetings / thanks / farewells
-    r"^\s*(你好|您好|嗨|哈喽|早上?好|中午好|下午好|晚上好|晚安)",
-    r"^\s*(谢谢|多谢|感谢|拜拜|再见|回头见|辛苦了)",
-    r"^\s*(在吗|你在吗|忙吗|最近怎么样)",
+    # Chinese greetings - 你好/您好/嗨/哈喽/哈罗
+    r"^\s*(你好|您好|嗨+|哈[喽啰罗囉])[\s!?。.！？～~]*$",
+    # Chinese morning greetings: 早 / 早安 / 早上好 / 早晨好 / 早呀 / 早啊
+    r"^\s*早(上|晨)?(好|安)?[\s!?。.！？呀啊嘛哦呢～~]*$",
+    # Chinese midday/afternoon/evening greetings
+    r"^\s*(午安|中午好|下午好)[\s!?。.！？呀啊～~]*$",
+    r"^\s*晚(上)?(好|安)?[\s!?。.！？呀啊～~]*$",
+    # Chinese thanks / farewells / casual
+    r"^\s*(谢谢|多谢|感谢|拜拜|再见|回头见|辛苦了|加油)\b",
+    r"^\s*(在吗|你在吗|忙吗|最近怎么样|怎么样啊?)\b",
     # Chinese identity / capability questions
     r"^\s*(你是谁|你叫什么|你能(做|干)什么|你是什么|介绍(一?下)?(你?自己|你))",
     r"^\s*(你会(做)?什么|你能帮(我|忙)|帮助|怎么(用|玩))",
@@ -747,11 +773,14 @@ class RAGChain:
         history = self._get_session_history(session_id)
         has_history = bool(history.messages)
 
+        lang = detect_language(question)
+        lang_directive = language_directive(lang)
+
         if is_chitchat(question, has_history=has_history):
-            logger.info("Chitchat detected, bypassing retrieval.")
+            logger.info("Chitchat detected, bypassing retrieval (lang=%s).", lang)
             try:
                 answer = self._chitchat_with_history.invoke(
-                    {"question": question},
+                    {"question": question, "language_directive": lang_directive},
                     config={"configurable": {"session_id": session_id}},
                 )
             except Exception as exc:
@@ -767,7 +796,10 @@ class RAGChain:
                 "scope": None,
             }
 
-        inputs: Dict[str, object] = {"question": question}
+        inputs: Dict[str, object] = {
+            "question": question,
+            "language_directive": lang_directive,
+        }
         if filenames:
             inputs["filenames"] = list(filenames)
 
@@ -802,7 +834,11 @@ class RAGChain:
         filenames: Optional[List[str]] = None,
     ) -> dict:
         """Stateless one-shot query, useful for evaluation."""
-        inputs: Dict[str, object] = {"question": question, "chat_history": []}
+        inputs: Dict[str, object] = {
+            "question": question,
+            "chat_history": [],
+            "language_directive": language_directive(detect_language(question)),
+        }
         if filenames:
             inputs["filenames"] = list(filenames)
         try:
@@ -844,15 +880,19 @@ class RAGChain:
         chat_history = list(history.messages)
         has_history = bool(chat_history)
 
+        lang = detect_language(question)
+        lang_directive = language_directive(lang)
+
         # ---- chitchat path ----------------------------------------------
         if is_chitchat(question, has_history=has_history):
-            logger.info("Chitchat detected, bypassing retrieval (streaming).")
+            logger.info("Chitchat detected (streaming, lang=%s).", lang)
             yield ("standalone", question)
             yield ("sources", [])
 
             messages = CHITCHAT_PROMPT.format_messages(
                 chat_history=chat_history,
                 question=question,
+                language_directive=lang_directive,
             )
             full_raw = ""
             stripper = _ThinkStripFilter()
@@ -918,6 +958,7 @@ class RAGChain:
             chat_history=chat_history,
             context=format_documents(docs, summaries=summaries),
             question=question,
+            language_directive=lang_directive,
         )
         full_raw = ""
         stripper = _ThinkStripFilter()
@@ -993,45 +1034,6 @@ class RAGChain:
             logger.exception("Failed to summarize %s", filename)
             return ""
 
-    # --------------------------------------------------------- suggestions
-    def suggest_followups(
-        self,
-        last_question: str,
-        last_answer: str,
-        max_suggestions: int = 3,
-    ) -> List[str]:
-        """Generate up to N short follow-up questions the user might ask
-        next, anchored on the documents currently indexed."""
-        if not last_answer:
-            return []
-        summaries = doc_summaries.all_summaries()
-        if summaries:
-            overview = doc_summaries.format_overview(summaries)
-        else:
-            files = self.vector_store.list_filenames()
-            overview = "\n".join(f"- {fn}" for fn in files) or "(no docs)"
-        try:
-            messages = SUGGESTIONS_PROMPT.format_messages(
-                documents_overview=overview,
-                question=last_question,
-                answer=last_answer[:600],
-            )
-            resp = self.llm.invoke(messages)
-            text = self._strip_reasoning(getattr(resp, "content", str(resp)))
-        except Exception:
-            logger.exception("Suggestion generation failed.")
-            return []
-        # Pick at most N non-empty lines that look like questions.
-        out: List[str] = []
-        for line in text.splitlines():
-            s = re.sub(r"^[\s\-\d\.\)、]+", "", line).strip()
-            s = re.sub(r"^['\"]+|['\"]+$", "", s)
-            if not s or len(s) < 4:
-                continue
-            out.append(s)
-            if len(out) >= max_suggestions:
-                break
-        return out
 
 
 # ---------------------------------------------------------------------------
