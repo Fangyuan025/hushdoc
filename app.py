@@ -200,12 +200,29 @@ with st.sidebar:
             st.success("Vector store wiped.")
             st.rerun()
 
-    # Show what's actually indexed (across all sessions, read from Chroma).
+    # Per-PDF scope selector. Without this, retrieval pools chunks from
+    # every indexed doc and mixes facts across them ("cross-talk"). The
+    # multiselect lets the user constrain each turn to specific files.
     indexed_files = _list_indexed_filenames()
     if indexed_files:
-        with st.expander(f"Indexed documents ({len(indexed_files)})", expanded=False):
-            for name in indexed_files:
-                st.write(f"- {name}")
+        if "scope" not in st.session_state:
+            # Default: search across everything that's indexed.
+            st.session_state.scope = list(indexed_files)
+        else:
+            # Drop any selections that no longer exist (file was unindexed).
+            st.session_state.scope = [
+                f for f in st.session_state.scope if f in indexed_files
+            ]
+
+        st.session_state.scope = st.multiselect(
+            f"Search in ({len(indexed_files)} indexed)",
+            options=indexed_files,
+            default=st.session_state.scope,
+            help="Restrict each query to specific PDFs. Leave empty or "
+                 "select all to search across the whole vector store.",
+        )
+    else:
+        st.session_state.scope = []
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +245,19 @@ for msg in st.session_state.messages:
                     st.markdown(label)
                     st.markdown(f"> {s.get('snippet', '')}")
 
+# Tiny scope indicator so users understand what each query will search.
+_indexed = _list_indexed_filenames()
+_selected = st.session_state.get("scope") or []
+if _indexed:
+    if not _selected or set(_selected) == set(_indexed):
+        st.caption(f"\U0001F50D Searching: **all {len(_indexed)} indexed document(s)**")
+    elif len(_selected) == 1:
+        st.caption(f"\U0001F50D Searching only: **{_selected[0]}**")
+    else:
+        st.caption(f"\U0001F50D Searching: **{len(_selected)} of {len(_indexed)} document(s)**")
+else:
+    st.caption("\U0001F4C2 No documents indexed yet — upload a PDF to start.")
+
 # Input.
 prompt = st.chat_input("Ask a question about your PDFs...")
 if prompt:
@@ -244,9 +274,20 @@ if prompt:
             st.session_state.messages.append({"role": "assistant", "content": err})
             st.stop()
 
+        # Resolve scope: empty selection or all-selected both mean "search
+        # everything" - we pass None in those cases so the underlying chain
+        # knows it can skip the filename filter entirely.
+        scope = st.session_state.get("scope") or []
+        all_indexed = _list_indexed_filenames()
+        scope_arg = None if (not scope or set(scope) == set(all_indexed)) else list(scope)
+
         with st.spinner("Thinking locally..."):
             try:
-                result = chain.ask(prompt, session_id=st.session_state.session_id)
+                result = chain.ask(
+                    prompt,
+                    session_id=st.session_state.session_id,
+                    filenames=scope_arg,
+                )
             except Exception as exc:
                 err = f"Error during RAG query: {exc}"
                 st.error(err)

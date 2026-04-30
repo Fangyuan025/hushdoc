@@ -405,8 +405,18 @@ class RAGChain:
             query = state.get("standalone") or state["question"]
             if not query.strip():
                 query = state["question"]
-            docs = self.vector_store.similarity_search(query, k=self.k)
-            logger.info("Retrieved %d chunks for standalone query.", len(docs))
+            # Optional per-call scope: list of filenames to restrict
+            # retrieval to. Prevents cross-document interference when the
+            # vector store holds multiple PDFs.
+            filenames = state.get("filenames") or None
+            docs = self.vector_store.similarity_search(
+                query, k=self.k, filenames=filenames
+            )
+            scope_label = ",".join(filenames) if filenames else "ALL"
+            logger.info(
+                "Retrieved %d chunks for standalone query (scope: %s).",
+                len(docs), scope_label,
+            )
             return docs
 
         # Pipeline: produce {question, chat_history, standalone, context, source_documents}
@@ -427,8 +437,23 @@ class RAGChain:
         return chain
 
     # --------------------------------------------------------------- main API
-    def ask(self, question: str, session_id: str = "default") -> dict:
+    def ask(
+        self,
+        question: str,
+        session_id: str = "default",
+        filenames: Optional[List[str]] = None,
+    ) -> dict:
         """Run a single conversational turn. Returns the full pipeline state.
+
+        Parameters
+        ----------
+        question : str
+            User input.
+        session_id : str
+            Conversational memory key.
+        filenames : list[str], optional
+            Restrict retrieval to these source files. None / empty = search
+            the entire vector store. Greetings short-circuit and ignore this.
 
         Greetings / meta-questions short-circuit to a chitchat reply that
         skips vector retrieval entirely.
@@ -452,11 +477,16 @@ class RAGChain:
                 "answer": answer,
                 "source_documents": [],
                 "chitchat": True,
+                "scope": None,
             }
+
+        inputs: Dict[str, object] = {"question": question}
+        if filenames:
+            inputs["filenames"] = list(filenames)
 
         try:
             result = self._chain_with_history.invoke(
-                {"question": question},
+                inputs,
                 config={"configurable": {"session_id": session_id}},
             )
         except Exception as exc:
@@ -469,14 +499,20 @@ class RAGChain:
             "answer": result.get("answer", ""),
             "source_documents": result.get("source_documents", []),
             "chitchat": False,
+            "scope": list(filenames) if filenames else None,
         }
 
-    def ask_no_memory(self, question: str) -> dict:
+    def ask_no_memory(
+        self,
+        question: str,
+        filenames: Optional[List[str]] = None,
+    ) -> dict:
         """Stateless one-shot query, useful for evaluation."""
+        inputs: Dict[str, object] = {"question": question, "chat_history": []}
+        if filenames:
+            inputs["filenames"] = list(filenames)
         try:
-            result = self._chain.invoke(
-                {"question": question, "chat_history": []}
-            )
+            result = self._chain.invoke(inputs)
         except Exception as exc:
             logger.exception("Stateless RAG chain invocation failed.")
             raise RuntimeError("Stateless RAG chain failed.") from exc
@@ -485,6 +521,7 @@ class RAGChain:
             "standalone_question": result.get("standalone", question),
             "answer": result.get("answer", ""),
             "source_documents": result.get("source_documents", []),
+            "scope": list(filenames) if filenames else None,
         }
 
 

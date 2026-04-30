@@ -13,7 +13,7 @@ import logging
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
@@ -181,23 +181,49 @@ class LocalVectorStore:
             self._store = self._init_store()
 
     # -------------------------------------------------------------- retrieval
+    @staticmethod
+    def _build_filter(
+        filter: Optional[dict],
+        filenames: Optional[Sequence[str]],
+    ) -> Optional[dict]:
+        """Compose an optional caller-supplied Chroma `where` filter with a
+        scope restriction to specific filenames. Empty / None filenames lists
+        mean 'no scope restriction' (search everything)."""
+        scope = None
+        if filenames:
+            names = [n for n in filenames if n]
+            if names:
+                scope = {"filename": {"$in": list(names)}}
+        if filter and scope:
+            return {"$and": [filter, scope]}
+        return filter or scope
+
     def similarity_search(
         self,
         query: str,
         k: int = 4,
         filter: Optional[dict] = None,
+        filenames: Optional[Sequence[str]] = None,
     ) -> List[Document]:
+        """Top-k similarity search, optionally restricted to a subset of
+        indexed filenames (multi-document cross-talk control)."""
+        where = self._build_filter(filter, filenames)
         try:
-            return self._store.similarity_search(query, k=k, filter=filter)
+            return self._store.similarity_search(query, k=k, filter=where)
         except Exception as exc:
             logger.exception("Similarity search failed for query: %s", query)
             raise RuntimeError("Vector search failed.") from exc
 
     def similarity_search_with_scores(
-        self, query: str, k: int = 4, filter: Optional[dict] = None
+        self,
+        query: str,
+        k: int = 4,
+        filter: Optional[dict] = None,
+        filenames: Optional[Sequence[str]] = None,
     ) -> List[tuple[Document, float]]:
+        where = self._build_filter(filter, filenames)
         try:
-            return self._store.similarity_search_with_score(query, k=k, filter=filter)
+            return self._store.similarity_search_with_score(query, k=k, filter=where)
         except Exception as exc:
             logger.exception("Scored similarity search failed.")
             raise RuntimeError("Vector search failed.") from exc
@@ -207,6 +233,17 @@ class LocalVectorStore:
         search_kwargs = {"k": k}
         search_kwargs.update(kwargs.pop("search_kwargs", {}))
         return self._store.as_retriever(search_kwargs=search_kwargs, **kwargs)
+
+    def list_filenames(self) -> List[str]:
+        """All distinct `filename` values currently in the collection.
+        Useful for the UI's 'search scope' selector."""
+        try:
+            data = self._store._collection.get(include=["metadatas"])  # noqa: SLF001
+        except Exception:
+            logger.exception("Failed to enumerate filenames.")
+            return []
+        names = {(m or {}).get("filename") for m in data.get("metadatas", [])}
+        return sorted(n for n in names if n)
 
 
 # ---------------------------------------------------------------------------
