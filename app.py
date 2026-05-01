@@ -165,15 +165,16 @@ with st.sidebar:
     # ── Documents
     st.subheader("\U0001F4C2 Documents")
 
-    # Docling natively handles both PDFs and document images: image inputs
-    # go through the OCR pipeline (RapidOCR), so a phone snap of a page
-    # gets indexed alongside real PDFs without any extra config.
+    # Docling routes by extension: PDFs go through the layout pipeline,
+    # DOCX is parsed natively from its XML, image suffixes go through the
+    # OCR pipeline. All three end up as the same chunked Documents.
     uploaded = st.file_uploader(
-        "Upload PDFs or document photos",
-        type=["pdf", "jpg", "jpeg", "png", "tif", "tiff", "bmp"],
+        "Upload PDFs, DOCX, or document photos",
+        type=["pdf", "docx", "jpg", "jpeg", "png", "tif", "tiff", "bmp"],
         accept_multiple_files=True,
         label_visibility="collapsed",
-        help="PDFs are layout-parsed; JPG/PNG/TIFF photos go through OCR.",
+        help="PDFs are layout-parsed; DOCX is parsed from XML; "
+             "JPG/PNG/TIFF photos go through OCR.",
     )
     replace_index = st.checkbox(
         "Replace existing index on upload",

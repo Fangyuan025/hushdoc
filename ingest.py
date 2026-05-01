@@ -40,13 +40,17 @@ logger = logging.getLogger("ingest")
 # Configuration
 # ---------------------------------------------------------------------------
 DEFAULT_DATA_DIR = Path("./data")
-# Docling auto-detects format from extension. PDFs go through the layout
-# pipeline; image suffixes go through the image pipeline which OCRs the
-# page via RapidOCR (already cached locally as a Docling dep). The chunker
-# downstream is format-agnostic - it just sees text + structure.
+# Docling auto-detects format from extension and routes to the right
+# pipeline:
+#   PDF    → standard layout pipeline (Heron model + TableFormer)
+#   DOCX   → Word backend (parses XML directly, no OCR)
+#   image  → image pipeline (RapidOCR for the text)
+# The downstream chunker / embedder / RAG chain are all format-agnostic;
+# they just see structured text with metadata.
 PDF_SUFFIXES = {".pdf"}
+DOCX_SUFFIXES = {".docx"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-SUPPORTED_SUFFIXES = PDF_SUFFIXES | IMAGE_SUFFIXES
+SUPPORTED_SUFFIXES = PDF_SUFFIXES | DOCX_SUFFIXES | IMAGE_SUFFIXES
 
 
 @dataclass
@@ -129,6 +133,10 @@ class PDFIngestor:
         return path.suffix.lower() in IMAGE_SUFFIXES
 
     @staticmethod
+    def _is_docx(path: Path) -> bool:
+        return path.suffix.lower() in DOCX_SUFFIXES
+
+    @staticmethod
     def _clean_text(text: str) -> str:
         # Collapse excessive blank lines while keeping paragraph breaks.
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
@@ -137,9 +145,10 @@ class PDFIngestor:
     # --------------------------------------------------------------- main API
     def ingest(self, src_path: str | Path) -> IngestionResult:
         """
-        Convert a single PDF or document image (JPG/PNG/TIFF/BMP) into
-        Markdown + a list of LangChain Documents. Images go through
-        Docling's image pipeline which runs OCR via RapidOCR.
+        Convert a single PDF, DOCX, or document image (JPG/PNG/TIFF/BMP)
+        into Markdown + a list of LangChain Documents. Images go through
+        Docling's image pipeline which runs OCR via RapidOCR; DOCX is
+        parsed natively from its XML.
 
         Returns
         -------
@@ -147,7 +156,12 @@ class PDFIngestor:
             Populated with markdown and chunked Documents.
         """
         src_path = self._validate_path(Path(src_path))
-        kind = "image (OCR)" if self._is_image(src_path) else "PDF"
+        if self._is_image(src_path):
+            kind = "image (OCR)"
+        elif self._is_docx(src_path):
+            kind = "DOCX"
+        else:
+            kind = "PDF"
         logger.info("Parsing %s with Docling: %s", kind, src_path.name)
 
         try:

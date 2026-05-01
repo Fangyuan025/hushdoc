@@ -8,14 +8,16 @@ questions, not the answers — ever leaves your computer. The only network
 call is the one-time HuggingFace download of the embedding / ASR / TTS
 models, after which you can run completely air-gapped.
 
-Built on **IBM Docling** (preserves tables, code, LaTeX math; OCRs JPG /
-PNG document photos via RapidOCR), **sentence-transformers** +
-**ChromaDB** (persistent local vector store), and a local **llama.cpp**
-server with any GGUF model. Streamlit UI on top with **token-by-token
-streaming**, multi-document scope filtering, automatic **Chinese /
-English language matching**, citation-anchored sources, and an **optional
-voice mode** (Whisper for speech-in, Kokoro for speech-out). Ragas
-evaluation on the side. No cloud, no API keys.
+Built on **IBM Docling** — handles **PDFs**, **Microsoft Word (.docx)**,
+and **document photos** (JPG / PNG / TIFF / BMP, OCR via RapidOCR), all
+through one ingest pipeline that preserves tables, code, and LaTeX math.
+Embeds with **sentence-transformers**, persists in **ChromaDB**, and
+answers via a local **llama.cpp** server with any GGUF model. Streamlit
+UI on top with **token-by-token streaming**, multi-document scope
+filtering, automatic **Chinese / English language matching**,
+citation-anchored sources, and an **optional voice mode** (Whisper for
+speech-in, Kokoro for speech-out). Ragas evaluation on the side. No
+cloud, no API keys.
 
 ## Architecture
 
@@ -68,7 +70,7 @@ Per-turn flow inside `llm_chain.py`:
 
 | File | What it does |
 |---|---|
-| `ingest.py` | PDF or document photo (JPG/PNG/TIFF/BMP) → Docling → HybridChunker → LangChain `Document`s with rich metadata. Images go through Docling's image pipeline which OCRs via RapidOCR. |
+| `ingest.py` | PDF / DOCX / document photo (JPG/PNG/TIFF/BMP) → Docling → HybridChunker → LangChain `Document`s with rich metadata. PDFs go through layout parsing, DOCX is parsed natively from XML, images go through OCR via RapidOCR. |
 | `vector_store.py` | HuggingFace `all-MiniLM-L6-v2` embeddings + persistent ChromaDB collection at `./chroma_db`. Idempotent upserts via SHA-256 IDs. Filename-scoped + balanced multi-doc retrieval. |
 | `llama_server.py` | Lifecycle manager for the standalone `llama-server.exe` (subprocess + `/health` polling + auto-shutdown). |
 | `llm_chain.py` | `LLMConfig`, `RAGChain` (streaming, memory, language detection, standalone-question rewriter with follow-up boost, chitchat short-circuit, citation parser), `ChatOpenAI` client pointed at the local server. |
@@ -127,15 +129,16 @@ Drop any GGUF model at `./models/model.gguf` (overridable via
 `LLAMA_MODEL_PATH`). Any architecture supported by your `llama-server.exe`
 build will work — pick a quantization that fits your VRAM.
 
-### 5. (One-time) Index a PDF or photo
+### 5. (One-time) Index a PDF, DOCX, or photo
 
 ```powershell
 python vector_store.py path\to\your.pdf
+python vector_store.py path\to\your.docx        # native XML parse
 python vector_store.py path\to\your-photo.jpg   # OCR via RapidOCR
 ```
 
-…or just upload from the Streamlit UI (drag-and-drop accepts both PDFs
-and JPG/PNG/TIFF document photos).
+…or just upload from the Streamlit UI (drag-and-drop accepts PDFs,
+DOCX, and JPG/PNG/TIFF document photos).
 
 ## Run
 
@@ -178,12 +181,12 @@ conversational reply (see step 4).
 
 ![Initial UI](screenshots/UI.png)
 
-**2. Pick a PDF or photo.** Use the **Upload** widget in the sidebar — it
-accepts PDFs as well as document photos (JPG / PNG / TIFF / BMP) which
-get OCR'd on ingest. Files queue up visually but aren't indexed yet — the
-**Ingest & Index** button is what actually runs Docling + the embedder.
-Leave **Replace existing index on upload** ticked (default) if you want
-each upload to start from a clean store.
+**2. Pick a file.** Use the **Upload** widget in the sidebar — it accepts
+PDFs, Microsoft Word documents (`.docx`), and document photos
+(JPG / PNG / TIFF / BMP, OCR'd on ingest). Files queue up visually but
+aren't indexed yet — the **Ingest & Index** button is what actually runs
+Docling + the embedder. Leave **Replace existing index on upload**
+ticked (default) if you want each upload to start from a clean store.
 
 ![Step 1 — file selected, ready to ingest](screenshots/Step%201.png)
 
@@ -259,16 +262,23 @@ single-sentence chunks (e.g. just a section header). `HybridChunker` merges
 adjacent peers up to a token budget, so each chunk carries enough context
 for high-precision retrieval.
 
-**Photo / scan ingestion.** Beyond born-digital PDFs, the same upload widget
-accepts JPG / PNG / TIFF / BMP. Docling auto-detects format from the
-extension and routes images through its image pipeline, which runs OCR
-via **RapidOCR** (already cached as a Docling dependency — no extra setup).
-The resulting markdown carries the OCR text with whatever layout structure
-the detector found, then flows through the same HybridChunker → embedding →
-RAG path as a PDF. Tested with a 1224×1584 phone-snap of an academic paper:
-OCR yields ~2.5 KB of structured markdown in under 5 s on CPU, and the
-chain correctly answers questions like "who are the authors?" from the
-extracted text.
+**Multi-format ingestion (PDF / DOCX / image).** The same upload widget
+accepts PDFs, `.docx`, and document photos (JPG / PNG / TIFF / BMP).
+Docling auto-detects format from the extension and routes:
+
+- **PDF** → layout pipeline (Heron model + TableFormer for tables)
+- **DOCX** → native XML parse (no OCR needed; preserves headings,
+  bullet lists, and tables verbatim)
+- **image** → OCR pipeline using **RapidOCR**, already cached as a
+  Docling dependency
+
+All three paths emit the same DoclingDocument structure, which then
+flows through HybridChunker → embedding → RAG with no special-casing
+downstream. Tested with a 1224×1584 phone-snap of an academic paper
+(OCR yields ~2.5 KB of structured markdown in under 5 s on CPU) and
+with a synthetic .docx containing a heading, bullet list, and a table
+(the chain correctly extracts table cells like "Whisper takes ~3 s on
+CPU for a 10s clip" when asked).
 
 **Per-PDF doc summaries.** Vanilla top-k similarity is bad at high-level
 questions ("which one is about ML?", "summarize this paper") because the
