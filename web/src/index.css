@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /*
  * Shadcn-style design tokens, Tailwind v4 flavour. The `@theme inline`
