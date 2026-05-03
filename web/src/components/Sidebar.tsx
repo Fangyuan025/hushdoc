@@ -3,6 +3,7 @@ import {
   Folder,
   Loader2,
   MessageSquarePlus,
+  Mic,
   Search,
   Trash2,
 } from "lucide-react"
@@ -11,15 +12,18 @@ import { DocumentUpload } from "@/components/DocumentUpload"
 import { ScopeSelector } from "@/components/ScopeSelector"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Switch } from "@/components/ui/switch"
 import { useDocuments } from "@/hooks/useDocuments"
 import { useScope } from "@/hooks/useScope"
+import type { useVoice } from "@/hooks/useVoice"
 
 interface SidebarProps {
   onClearChat: () => void
   onScopeChange: (scope: string[] | null) => void
+  voice: ReturnType<typeof useVoice>
 }
 
-export function Sidebar({ onClearChat, onScopeChange }: SidebarProps) {
+export function Sidebar({ onClearChat, onScopeChange, voice }: SidebarProps) {
   const { list, del } = useDocuments()
   const indexed = list.data?.filenames ?? []
   const summaries = list.data?.summaries ?? {}
@@ -66,6 +70,32 @@ export function Sidebar({ onClearChat, onScopeChange }: SidebarProps) {
               onSelectAll={scope.selectAll}
               onSelectNone={scope.selectNone}
             />
+          </Section>
+
+          {/* Voice */}
+          <Section
+            icon={<Mic className="h-3.5 w-3.5" />}
+            title="Voice"
+          >
+            <label className="flex cursor-pointer items-center justify-between gap-2 rounded-md border bg-card px-2.5 py-2 text-xs">
+              <span>Voice mode</span>
+              <Switch
+                checked={voice.enabled}
+                onCheckedChange={(v) => voice.setEnabled(v)}
+              />
+            </label>
+            {voice.enabled && (
+              <p className="px-1 text-[11px] leading-snug text-muted-foreground">
+                🌐 English only — Whisper-base.en in, Kokoro-82M out. Mic
+                appears beside the chat input; auto-stops after 1.5 s of
+                silence.
+              </p>
+            )}
+            {voice.error && (
+              <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
+                {voice.error}
+              </p>
+            )}
           </Section>
         </div>
       </ScrollArea>

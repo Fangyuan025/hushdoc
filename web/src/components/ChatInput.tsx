@@ -11,6 +11,8 @@ interface ChatInputProps {
   placeholder?: string
   onSend: (text: string) => void
   onStop?: () => void
+  /** Slot for an optional mic button rendered to the left of the textarea. */
+  leftSlot?: React.ReactNode
 }
 
 /** Bottom-anchored textarea + send button. Enter sends, Shift+Enter newline. */
@@ -20,6 +22,7 @@ export function ChatInput({
   placeholder = "Ask anything about your PDFs…",
   onSend,
   onStop,
+  leftSlot,
 }: ChatInputProps) {
   const [value, setValue] = useState("")
 
@@ -40,6 +43,7 @@ export function ChatInput({
   return (
     <div className="border-t bg-background/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border bg-card px-3 py-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+        {leftSlot}
         <TextareaAutosize
           value={value}
           onChange={(e) => setValue(e.target.value)}

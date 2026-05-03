@@ -133,3 +133,10 @@
   color: var(--muted-foreground);
   animation: hushdoc-cursor 1s steps(1) infinite;
 }
+
+/* Pulsing ring for the mic button while recording. */
+@keyframes hushdoc-mic-pulse {
+  0%   { opacity: 0.6; }
+  70%  { opacity: 0; }
+  100% { opacity: 0; }
+}

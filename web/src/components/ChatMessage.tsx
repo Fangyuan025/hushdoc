@@ -1,4 +1,4 @@
-import { User, Sparkles } from "lucide-react"
+import { User, Sparkles, Volume2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -7,8 +7,15 @@ import type { ChatMessage as Msg } from "@/types"
 
 import { Sources } from "./Sources"
 
+interface ChatMessageProps {
+  msg: Msg
+  /** Optional handler for the 🔊 replay icon next to the assistant
+   *  bubble. Receives the cached blob URL to re-play. */
+  onReplay?: (audioUrl: string) => void
+}
+
 /** One chat bubble. Assistant supports markdown + code + GFM tables. */
-export function ChatMessage({ msg }: { msg: Msg }) {
+export function ChatMessage({ msg, onReplay }: ChatMessageProps) {
   const isUser = msg.role === "user"
 
   return (
@@ -47,8 +54,27 @@ export function ChatMessage({ msg }: { msg: Msg }) {
           )}
         </div>
 
-        {!isUser && !msg.chitchat && msg.sources && msg.sources.length > 0 && (
-          <Sources docs={msg.sources} standaloneQuery={msg.standaloneQuery} />
+        {!isUser && (msg.audioUrl || (msg.sources && msg.sources.length > 0)) && (
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              {!msg.chitchat && msg.sources && msg.sources.length > 0 && (
+                <Sources
+                  docs={msg.sources}
+                  standaloneQuery={msg.standaloneQuery}
+                />
+              )}
+            </div>
+            {msg.audioUrl && onReplay && !msg.streaming && (
+              <button
+                type="button"
+                onClick={() => onReplay(msg.audioUrl!)}
+                className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Replay audio"
+              >
+                <Volume2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         )}
       </div>
       {isUser && (

@@ -192,5 +192,16 @@ export function useChat({ sessionId, scope, onDone }: UseChatOptions) {
     }
   }, [sessionId, stop])
 
-  return { messages, send, stop, clear, streaming, error }
+  /** Patch a single field on a message — used by voice mode to attach the
+   *  TTS audio URL to the assistant message after it streams in. */
+  const patchMessage = useCallback(
+    (id: string, audioUrl: string) => {
+      setMessages((m) =>
+        m.map((msg) => (msg.id === id ? { ...msg, audioUrl } : msg)),
+      )
+    },
+    [],
+  )
+
+  return { messages, send, stop, clear, streaming, error, patchMessage }
 }

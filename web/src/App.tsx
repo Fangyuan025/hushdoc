@@ -9,6 +9,7 @@ import { AlertTriangle, Loader2, Moon, ShieldCheck, Sun } from "lucide-react"
 import { ChatPane, type ChatPaneHandle } from "@/components/ChatPane"
 import { Sidebar } from "@/components/Sidebar"
 import { Button } from "@/components/ui/button"
+import { useVoice } from "@/hooks/useVoice"
 import { apiHealth } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -105,6 +106,10 @@ function Shell() {
   const [scope, setScope] = useState<string[] | null>(null)
   const chatRef = useRef<ChatPaneHandle>(null)
 
+  // Single voice instance shared between Sidebar (toggle), ChatInput
+  // (mic button), and ChatPane (post-stream synthesise+autoplay).
+  const voice = useVoice()
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex shrink-0 items-center justify-between border-b px-5 py-2.5">
@@ -133,9 +138,15 @@ function Shell() {
         <Sidebar
           onClearChat={() => chatRef.current?.clear()}
           onScopeChange={setScope}
+          voice={voice}
         />
         <div className="flex min-w-0 flex-1">
-          <ChatPane ref={chatRef} sessionId={sessionId} scope={scope} />
+          <ChatPane
+            ref={chatRef}
+            sessionId={sessionId}
+            scope={scope}
+            voice={voice}
+          />
         </div>
       </main>
     </div>
