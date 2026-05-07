@@ -99,31 +99,65 @@ air-gapped — Wi-Fi off, ethernet unplugged, doesn't matter.
 
 You need:
 
-- Windows 10/11 (Linux / macOS via `dev.sh` works too — see Notes)
-- An NVIDIA GPU is **recommended** for fast answers; a recent CPU
-  works fine for short documents.
-- Python 3.12, Node 20+, and a few GB of disk for the models.
+- Windows 10 / 11 (Linux / macOS works via `dev.sh` — see Notes)
+- [Python 3.12](https://www.python.org/downloads/release/python-3120/)
+  (tick *Add to PATH* during install)
+- [Node.js 20+](https://nodejs.org/) (LTS is fine)
+- ~3 GB free disk for the default model + AI runtime
+- An NVIDIA GPU is **optional** — speeds up large models, but the
+  default Qwen3-1.7B runs comfortably on CPU.
+
+### The easy way: two double-clicks
 
 ```powershell
-# 1. Python environment
+.\setup.bat        # one-time: installs deps + downloads runtime + model
+.\hushdoc.bat      # every time after: launches the app
+```
+
+`setup.bat` is fully automatic and re-runnable. It will:
+
+1. Create the Python venv (`.venv\`) and `pip install` everything
+2. Run `npm install` for the frontend
+3. Download `llama-server.exe` (latest CPU build from llama.cpp) into
+   `.\runtime\` — ~15 MB
+4. Download the default model **Qwen3-1.7B Q4_K_M** (~1.2 GB) from
+   [HuggingFace](https://huggingface.co/MaziyarPanahi/Qwen3-1.7B-GGUF)
+   into `.\models\model.gguf`
+
+Each step skips itself if it's already done, so you can re-run setup
+safely after `git pull`.
+
+> **Have an NVIDIA GPU?** Run `.\setup.bat -GpuBuild` to download the
+> CUDA 12.4 build of llama-server instead of the CPU one. Same model
+> file, just much faster inference for larger models. (CUDA runtime
+> needs to be installed on your system.)
+
+### Want a different / larger model?
+
+Drop any `.gguf` file at `.\models\model.gguf`, replacing the one
+setup downloaded. Pick something that fits your RAM — for example:
+
+- **Qwen3-4B Q4_K_M** (~2.5 GB) — better reasoning, still fits on 8 GB RAM
+- **Mistral-7B-Instruct Q4_K_M** (~4.5 GB) — strong English baseline
+- **Llama-3.1-8B Q4_K_M** (~4.7 GB) — excellent general model
+
+You can also point at any other path via the `LLAMA_MODEL_PATH` env var.
+
+### Manual setup (if you'd rather not use the script)
+
+```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-
-# 2. Frontend dependencies (one-time)
 cd web && npm install && cd ..
-
-# 3. Get llama-server.exe and a model
-#    - Grab a CUDA build from https://github.com/ggerganov/llama.cpp/releases
-#      (any *-bin-win-cuda-*.zip matching your CUDA version)
-#    - Drop any GGUF model at .\models\model.gguf
-$env:LLAMA_SERVER_EXE = "C:\path\to\llama-server.exe"
-
-# 4. Launch
+# Then download a llama-server.exe and a .gguf yourself, place at
+# .\runtime\llama-server.exe and .\models\model.gguf, and launch:
 .\hushdoc.bat
 ```
 
-Hushdoc will open in your default browser at <http://localhost:5173>.
-Drop a PDF in the sidebar and ask away.
+---
+
+After setup, Hushdoc opens in your default browser at
+<http://localhost:5173>. Drop a PDF in the sidebar and ask away.
 
 > **First answer takes 10–20 s** while the model warms up. Subsequent
 > answers stream in within a second.
@@ -197,8 +231,10 @@ hushdoc/
 ├── doc_summaries.py per-file summary cache
 ├── voice.py         Whisper ASR + Kokoro TTS
 ├── evaluate.py      offline Ragas scoring
+├── setup.bat        one-time installer (deps + runtime + model)
 ├── hushdoc.bat      one-click launcher with cleanup prompt
 └── dev.sh / dev.ps1 plain dev launchers (no auto-cleanup)
+                     (gitignored: runtime/  models/*.gguf)
 ```
 
 ---

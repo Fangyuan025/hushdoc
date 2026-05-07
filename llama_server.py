@@ -37,12 +37,29 @@ if not logger.handlers:
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-DEFAULT_SERVER_EXE = Path(
-    os.environ.get(
-        "LLAMA_SERVER_EXE",
-        r"C:\Users\25289\Downloads\files\runtime\llama-server.exe",
-    )
-)
+# Search order for the llama-server binary:
+#   1. $LLAMA_SERVER_EXE              (explicit override)
+#   2. ./runtime/llama-server.exe     (populated by setup.bat)
+#   3. ./runtime/llama-server         (Linux / macOS, also populated by setup)
+# The first existing path wins; if none exist, ServerConfig.start() raises a
+# clear FileNotFoundError pointing the user at setup.bat.
+def _resolve_default_server_exe() -> Path:
+    env = os.environ.get("LLAMA_SERVER_EXE")
+    if env:
+        return Path(env)
+    here = Path(__file__).resolve().parent
+    for candidate in (
+        here / "runtime" / "llama-server.exe",
+        here / "runtime" / "llama-server",
+    ):
+        if candidate.exists():
+            return candidate
+    # Fall through to the Windows default; .start() will surface a useful
+    # error message if it doesn't exist yet.
+    return here / "runtime" / "llama-server.exe"
+
+
+DEFAULT_SERVER_EXE = _resolve_default_server_exe()
 DEFAULT_MODEL_PATH = Path(
     os.environ.get("LLAMA_MODEL_PATH", "./models/model.gguf")
 )

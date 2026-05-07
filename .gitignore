@@ -4,6 +4,7 @@ chat_history/
 data/uploads/
 eval_results/
 models/*.gguf
+runtime/
 
 # Python
 __pycache__/
