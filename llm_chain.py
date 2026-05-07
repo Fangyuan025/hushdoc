@@ -557,10 +557,18 @@ class RAGChain:
         llm: Optional[ChatOpenAI] = None,
         llm_config: Optional[LLMConfig] = None,
         k: int = 6,
+        use_reranker: bool = True,
+        rerank_multiplier: int = 3,
     ) -> None:
         self.vector_store = vector_store or build_default_store()
         self.llm = llm or load_local_llm(llm_config)
         self.k = k
+        # Cross-encoder reranker: over-fetch k * rerank_multiplier candidates
+        # by bi-encoder similarity, then keep the top-k after the cross-encoder
+        # rescores them. Disable with use_reranker=False (e.g. for ragas where
+        # determinism matters more than precision).
+        self.use_reranker = use_reranker
+        self.rerank_multiplier = max(1, rerank_multiplier)
         self._sessions: Dict[str, BaseChatMessageHistory] = {}
 
         self._chain = self._build_chain()
@@ -693,25 +701,44 @@ class RAGChain:
                 filenames if filenames else self.vector_store.list_filenames()
             )
 
+            # Over-fetch when reranker is on so the cross-encoder has
+            # something to rescore. Cap at 30 to keep rerank latency bounded.
+            candidate_k = (
+                min(self.k * self.rerank_multiplier, 30)
+                if self.use_reranker
+                else self.k
+            )
+
             # Balanced retrieval whenever 2+ docs are in play. Keeps a single
             # semantically-dominant doc from crowding out the rest, which
             # otherwise makes 'what's common between the two' or 'which one
             # is about X' unanswerable.
             if len(effective_scope) >= 2:
-                docs = self.vector_store.similarity_search_balanced(
-                    query, k=self.k, filenames=effective_scope,
+                candidates = self.vector_store.similarity_search_balanced(
+                    query, k=candidate_k, filenames=effective_scope,
                 )
-                mode = "balanced"
+                base_mode = "balanced"
             else:
-                docs = self.vector_store.similarity_search(
-                    query, k=self.k, filenames=filenames,
+                candidates = self.vector_store.similarity_search(
+                    query, k=candidate_k, filenames=filenames,
                 )
-                mode = "topk"
+                base_mode = "topk"
+
+            # Cross-encoder rerank: rescores (query, candidate) pairs and
+            # keeps the top-k. No-op if reranker load failed or candidates
+            # already fit the budget.
+            if self.use_reranker and len(candidates) > self.k:
+                from reranker import rerank
+                docs = rerank(query, candidates, top_k=self.k)
+                mode = base_mode + "+rerank"
+            else:
+                docs = candidates[: self.k]
+                mode = base_mode
 
             scope_label = ",".join(filenames) if filenames else "ALL"
             logger.info(
-                "Retrieved %d chunks (%s, scope: %s).",
-                len(docs), mode, scope_label,
+                "Retrieved %d/%d chunks (%s, scope: %s).",
+                len(docs), len(candidates), mode, scope_label,
             )
             return docs
 

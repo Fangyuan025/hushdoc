@@ -139,7 +139,9 @@ def run_evaluation(
     logger.info("Initializing local LLM and vector store...")
     llm = load_local_llm(LLMConfig())
     store = build_default_store()
-    chain = RAGChain(vector_store=store, llm=llm)
+    # Disable the reranker during eval so retrieval is deterministic
+    # and reproducible across runs.
+    chain = RAGChain(vector_store=store, llm=llm, use_reranker=False)
 
     # 2. Generate predictions.
     cases = load_test_set(test_set_path)
