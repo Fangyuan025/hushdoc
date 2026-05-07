@@ -67,9 +67,42 @@ interface UseChatOptions {
   sessionId: string
   scope?: string[] | null
   onDone?: (msg: ChatMessage) => void
+  /** Called for each completed sentence as the answer streams in. Used
+   *  by the voice pipeline to enqueue per-sentence TTS so audio plays
+   *  while the rest of the answer is still arriving. */
+  onSentence?: (sentence: string) => void
+  /** Called once after the answer's last token. Lets the voice pipeline
+   *  drain its sentence queue. */
+  onStreamComplete?: () => void
 }
 
-export function useChat({ sessionId, scope, onDone }: UseChatOptions) {
+/** Find the index just past the last sentence terminator in `text`,
+ *  or -1 if none. Handles both ASCII and full-width punctuation, and
+ *  ignores common abbreviations like "e.g." / "Mr." that would
+ *  otherwise split mid-thought. */
+function findLastSentenceBreak(text: string): number {
+  const re = /[.!?。！？\n](?:["')\]]+)?(\s|$)/g
+  let last = -1
+  for (;;) {
+    const m = re.exec(text)
+    if (!m) break
+    const end = m.index + m[0].length
+    // Reject obvious abbreviations: "e.g.", "Mr.", "Dr.", "p.5"
+    const before = text.slice(Math.max(0, m.index - 4), m.index + 1)
+    if (/(?:^|\s)(?:e\.g|i\.e|Mr|Mrs|Ms|Dr|Jr|Sr|St|Fig|p|pp)\.$/i.test(before))
+      continue
+    last = end
+  }
+  return last
+}
+
+export function useChat({
+  sessionId,
+  scope,
+  onDone,
+  onSentence,
+  onStreamComplete,
+}: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -96,6 +129,27 @@ export function useChat({ sessionId, scope, onDone }: UseChatOptions) {
       setStreaming(true)
       setError(null)
 
+      // Sentence-buffer for streaming TTS: accumulate raw tokens and
+      // emit completed sentences to the caller. We track the byte
+      // offset of what we've already emitted so we don't double-feed.
+      let ttsBuf = ""
+      let ttsEmitted = 0
+      const flushSentences = (final = false) => {
+        if (!onSentence) return
+        const remaining = ttsBuf.slice(ttsEmitted)
+        const breakAt = findLastSentenceBreak(remaining)
+        if (breakAt > 0) {
+          const ready = remaining.slice(0, breakAt).trim()
+          if (ready) onSentence(ready)
+          ttsEmitted += breakAt
+        }
+        if (final) {
+          const tail = remaining.slice(breakAt > 0 ? breakAt : 0).trim()
+          if (tail) onSentence(tail)
+          ttsEmitted = ttsBuf.length
+        }
+      }
+
       const ac = new AbortController()
       abortRef.current = ac
       try {
@@ -114,6 +168,8 @@ export function useChat({ sessionId, scope, onDone }: UseChatOptions) {
         for await (const ev of parseSSE(resp, ac.signal)) {
           if (ev.event === "token") {
             const text = (ev.data as { text: string }).text
+            ttsBuf += text
+            flushSentences(false)
             setMessages((m) =>
               m.map((msg) =>
                 msg.id === aiId ? { ...msg, content: msg.content + text } : msg,
@@ -135,6 +191,10 @@ export function useChat({ sessionId, scope, onDone }: UseChatOptions) {
             )
           } else if (ev.event === "done") {
             const done = ev.data as DoneEvent
+            // Drain any leftover sentence fragment that didn't end with
+            // punctuation (e.g. last token was "...feedback").
+            flushSentences(true)
+            onStreamComplete?.()
             const finalMsg: ChatMessage = {
               ...aiMsg,
               content: done.answer || "",

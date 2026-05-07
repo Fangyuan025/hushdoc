@@ -31,26 +31,44 @@ export interface ChatPaneHandle {
 
 export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
   function ChatPane({ sessionId, scope, voice }, ref) {
-    // After each completed assistant turn, optionally synthesise + autoplay
-    // and stash the resulting blob URL on the message for the replay icon.
+    // After each completed assistant turn, cache the FULL synthesised
+    // audio on the message so the 🔊 replay button works. This is a
+    // background fetch — the streaming-TTS pipeline already played the
+    // answer aloud sentence-by-sentence as tokens arrived (via
+    // onSentence below), so the user has already heard everything.
+    // We only need a single blob URL stashed for replay.
     const onDone = useCallback(
       async (msg: Msg) => {
-        if (!voice.enabled) return
-        if (msg.chitchat) {
-          // chitchat path also gets read out — same English-only filter
-        }
-        const url = await voice.synthesizeAndPlay(msg.content)
-        if (url) {
-          // Mutate the message in place via the chat hook's setter — easier
-          // to expose a tiny patch helper than to plumb a new event through.
+        if (!voice.enabled || !msg.content) return
+        // Don't auto-play here — streaming TTS already did. Just cache.
+        try {
+          const wav = await (await fetch("/api/voice/synthesize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: msg.content }),
+          })).blob()
+          const url = URL.createObjectURL(wav)
           attachAudioRef.current?.(msg.id, url)
+        } catch {
+          /* replay is a nice-to-have; don't toast on failure */
         }
       },
       [voice],
     )
 
     const { messages, send, stop, clear, streaming, error, patchMessage } =
-      useChat({ sessionId, scope, onDone })
+      useChat({
+        sessionId,
+        scope,
+        onDone,
+        // Sentence-by-sentence streaming TTS: enqueue each completed
+        // sentence to the voice worker as soon as it lands. Audio
+        // starts playing while the rest of the answer is still being
+        // generated, eliminating the 5-15s gap of dead air the old
+        // "synthesise after done" approach left.
+        onSentence: voice.feedStreamingTTS,
+        onStreamComplete: voice.finishStreamingTTS,
+      })
 
     const attachAudioRef = useRef<(id: string, url: string) => void>(
       patchMessage,
@@ -84,11 +102,22 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
       [clear, voice, streaming, stop],
     )
 
+    // Wrap send so any in-flight TTS for the previous answer is killed
+    // before a new turn starts — otherwise the old answer keeps reading
+    // aloud over the user's new question.
+    const sendWithCancel = useCallback(
+      (text: string) => {
+        voice.stopPlayback()
+        send(text)
+      },
+      [voice, send],
+    )
+
     // Voice input — once VAD stops + transcribe returns, send immediately.
     const startVoice = useCallback(async () => {
       const text = await voice.record()
-      if (text) send(text)
-    }, [voice, send])
+      if (text) sendWithCancel(text)
+    }, [voice, sendWithCancel])
 
     return (
       <div className="relative flex h-full min-h-0 flex-1 flex-col">
@@ -162,7 +191,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
         <ChatInput
           ref={inputRef}
           streaming={streaming}
-          onSend={send}
+          onSend={sendWithCancel}
           onStop={stop}
           leftSlot={
             voice.enabled ? (

@@ -164,10 +164,114 @@ export function useVoice() {
     [enabled, playUrl],
   )
 
+  // ----------------------------------------------------------------------
+  // Streaming TTS: synth + play one sentence at a time as tokens arrive.
+  //
+  // Streamlit-era we waited for the full answer to land before kicking
+  // off TTS, which left a 5-15s gap of dead air. Now we maintain a
+  // queue: feed() pushes a sentence to a synth-and-enqueue worker,
+  // and as each WAV finishes synth we chain it into the same hidden
+  // <audio> via 'ended' so playback stays continuous. End-of-stream
+  // is signalled with a sentinel so the queue can drain cleanly.
+  // ----------------------------------------------------------------------
+  type Job = { text: string } | "DONE"
+  const queueRef = useRef<Job[]>([])
+  const jobUrlsRef = useRef<string[]>([])
+  const drainingRef = useRef<boolean>(false)
+  const streamingActiveRef = useRef<boolean>(false)
+
+  const drainQueue = useCallback(async () => {
+    if (drainingRef.current) return
+    drainingRef.current = true
+    const el = playerRef.current
+    // Snapshot the generation so a cancel() raced against an in-flight
+    // synth aborts cleanly rather than playing a stale clip.
+    while (streamingActiveRef.current) {
+      const next = queueRef.current.shift()
+      if (!next) {
+        drainingRef.current = false
+        return
+      }
+      if (next === "DONE") {
+        streamingActiveRef.current = false
+        drainingRef.current = false
+        return
+      }
+      try {
+        const wav = await apiSynthesize(next.text)
+        if (!streamingActiveRef.current) break // cancelled during synth
+        const url = URL.createObjectURL(wav)
+        jobUrlsRef.current.push(url)
+        if (el) {
+          // Wait for the previous clip to finish before starting this one.
+          if (!el.paused && el.src) {
+            await new Promise<void>((resolve) => {
+              const onDone = () => {
+                el.removeEventListener("ended", onDone)
+                el.removeEventListener("emptied", onDone)
+                resolve()
+              }
+              el.addEventListener("ended", onDone, { once: true })
+              el.addEventListener("emptied", onDone, { once: true })
+            })
+          }
+          if (!streamingActiveRef.current) break // cancelled mid-wait
+          el.src = url
+          el.currentTime = 0
+          await el.play().catch(() => undefined)
+        }
+      } catch (err) {
+        // One sentence failing shouldn't kill the whole stream.
+        const msg = err instanceof Error ? err.message : String(err)
+        toast.error(`TTS chunk failed: ${msg}`)
+      }
+    }
+    drainingRef.current = false
+  }, [])
+
+  /** Push one sentence into the streaming-TTS queue. Skips silently when
+   *  voice mode is off or the sentence isn't English. */
+  const feedStreamingTTS = useCallback(
+    (sentence: string) => {
+      if (!enabled) return
+      const t = sentence.trim()
+      if (!t || !isEnglish(t)) return
+      queueRef.current.push({ text: t })
+      streamingActiveRef.current = true
+      void drainQueue()
+    },
+    [enabled, drainQueue],
+  )
+
+  /** Mark the streaming TTS stream as complete. Plays whatever's left in
+   *  the queue then stops the worker. */
+  const finishStreamingTTS = useCallback(() => {
+    if (!streamingActiveRef.current) return
+    queueRef.current.push("DONE")
+    void drainQueue()
+  }, [drainQueue])
+
+  /** Drop everything queued (used by stopPlayback / new-chat / ESC). */
+  const cancelStreamingTTS = useCallback(() => {
+    queueRef.current.length = 0
+    streamingActiveRef.current = false
+    drainingRef.current = false
+    for (const u of jobUrlsRef.current) URL.revokeObjectURL(u)
+    jobUrlsRef.current = []
+  }, [])
+
+  // Wire the streaming-TTS queue cancel into the existing stopPlayback
+  // so a single call drops both: any queued sentences AND the currently
+  // playing clip.
+  const stopPlaybackEverything = useCallback(() => {
+    cancelStreamingTTS()
+    stopPlayback()
+  }, [cancelStreamingTTS, stopPlayback])
+
   return {
     enabled,
     isPlaying,
-    stopPlayback,
+    stopPlayback: stopPlaybackEverything,
     togglePause,
     setEnabled,
     state,
@@ -177,5 +281,8 @@ export function useVoice() {
     cancel,
     synthesizeAndPlay,
     playUrl,
+    feedStreamingTTS,
+    finishStreamingTTS,
+    cancelStreamingTTS,
   }
 }
