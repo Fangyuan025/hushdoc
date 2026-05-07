@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { apiClearChat } from "@/lib/api"
+import { conversationApi } from "@/hooks/useConversations"
 import type { ChatMessage, DoneEvent, SourceDoc } from "@/types"
 
 /**
@@ -64,7 +65,12 @@ async function* parseSSE(
 }
 
 interface UseChatOptions {
-  sessionId: string
+  /** Optional persistent conversation id. When set, the backend
+   *  appends each turn to ./chat_history/<id>.json AND emits a `title`
+   *  event after the first turn so the sidebar list updates. */
+  conversationId?: string | null
+  /** Legacy in-memory key, used only if conversationId is null. */
+  sessionId?: string
   scope?: string[] | null
   onDone?: (msg: ChatMessage) => void
   /** Called for each completed sentence as the answer streams in. Used
@@ -74,6 +80,17 @@ interface UseChatOptions {
   /** Called once after the answer's last token. Lets the voice pipeline
    *  drain its sentence queue. */
   onStreamComplete?: () => void
+  /** Called when the backend emits a `title` SSE event after the
+   *  first turn of a fresh conversation. */
+  onTitle?: (conversationId: string, title: string) => void
+  /** When set to the current conversationId, suppresses the hydration
+   *  fetch ONCE — the next conversationId change does fetch as usual.
+   *  Used to avoid clobbering optimistic messages immediately after a
+   *  brand-new conversation is auto-created on send. */
+  skipHydrationFor?: string | null
+  /** Fires after the suppressed hydration so the parent can reset
+   *  ``skipHydrationFor`` to null. */
+  onHydrationConsumed?: () => void
 }
 
 /** Find the index just past the last sentence terminator in `text`,
@@ -97,21 +114,89 @@ function findLastSentenceBreak(text: string): number {
 }
 
 export function useChat({
-  sessionId,
+  conversationId,
+  sessionId = "default",
   scope,
   onDone,
   onSentence,
   onStreamComplete,
+  onTitle,
+  skipHydrationFor,
+  onHydrationConsumed,
 }: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  // When the active conversation id changes, fetch its persisted messages
+  // and replace the local state so switching conversations in the sidebar
+  // restores the right history. null/undefined → empty pane.
+  //
+  // We track which id we've already settled (either fetched or
+  // explicitly skipped) in a ref so the effect re-running because
+  // skipHydrationFor flipped to null doesn't re-fetch and clobber
+  // the in-flight optimistic send.
+  const settledConvIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    abortRef.current?.abort()
+    abortRef.current = null
+    if (!conversationId) {
+      setMessages([])
+      setError(null)
+      setStreaming(false)
+      settledConvIdRef.current = null
+      return
+    }
+    if (settledConvIdRef.current === conversationId) {
+      // Already loaded (or explicitly skipped) for this id this session.
+      return
+    }
+    setError(null)
+    setStreaming(false)
+    // Auto-create-on-send path: the parent already knows this conv was
+    // just minted empty AND we're about to start streaming optimistic
+    // messages into it, so a hydration fetch would just clobber them.
+    if (skipHydrationFor && skipHydrationFor === conversationId) {
+      settledConvIdRef.current = conversationId
+      onHydrationConsumed?.()
+      return
+    }
+    settledConvIdRef.current = conversationId
+    conversationApi
+      .get(conversationId)
+      .then((conv) => {
+        if (cancelled) return
+        setMessages(
+          conv.messages.map((m, i) => ({
+            id: `${conversationId}-${i}`,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })),
+        )
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, skipHydrationFor])
+
   const send = useCallback(
-    async (question: string) => {
+    async (
+      question: string,
+      opts?: { conversationId?: string | null },
+    ) => {
       const trimmed = question.trim()
       if (!trimmed || streaming) return
+      // Caller can override conversationId for the fresh-conv case where
+      // setState hasn't propagated yet — we need to send to the just-
+      // created id, not the one captured in this closure.
+      const convIdForSend = opts?.conversationId ?? conversationId
 
       const userMsg: ChatMessage = {
         id: `u-${Date.now()}`,
@@ -158,6 +243,7 @@ export function useChat({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             question: trimmed,
+            conversation_id: convIdForSend ?? null,
             session_id: sessionId,
             filenames: scope && scope.length > 0 ? scope : null,
           }),
@@ -207,6 +293,9 @@ export function useChat({
               m.map((msg) => (msg.id === aiId ? finalMsg : msg)),
             )
             onDone?.(finalMsg)
+          } else if (ev.event === "title") {
+            const tev = ev.data as { conversation_id: string; title: string }
+            onTitle?.(tev.conversation_id, tev.title)
           } else if (ev.event === "error") {
             const errMsg =
               (ev.data as { message?: string }).message || "stream error"
@@ -229,7 +318,7 @@ export function useChat({
         abortRef.current = null
       }
     },
-    [sessionId, scope, streaming, onDone],
+    [conversationId, sessionId, scope, streaming, onDone, onSentence, onStreamComplete, onTitle],
   )
 
   const stop = useCallback(() => {
@@ -246,11 +335,13 @@ export function useChat({
     setMessages([])
     setError(null)
     try {
-      await apiClearChat(sessionId)
+      // Clear the chain's in-memory chat history for whichever key
+      // this conversation uses on the server.
+      await apiClearChat(conversationId ?? sessionId)
     } catch {
       /* ignore — server-side memory will be reset on next ask anyway */
     }
-  }, [sessionId, stop])
+  }, [conversationId, sessionId, stop])
 
   /** Patch a single field on a message — used by voice mode to attach the
    *  TTS audio URL to the assistant message after it streams in. */

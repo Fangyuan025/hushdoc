@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   QueryClient,
   QueryClientProvider,
@@ -18,10 +18,13 @@ import { ChatPane, type ChatPaneHandle } from "@/components/ChatPane"
 import { Sidebar, SidebarContent } from "@/components/Sidebar"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { useConversations } from "@/hooks/useConversations"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { useVoice } from "@/hooks/useVoice"
 import { apiHealth } from "@/lib/api"
 import { cn } from "@/lib/utils"
+
+const ACTIVE_CONV_KEY = "hushdoc-active-conv"
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -99,26 +102,75 @@ function Shell() {
     document.documentElement.classList.toggle("dark", dark)
   }, [dark])
 
-  // One stable session id per browser tab.
-  const sessionId = useMemo(() => {
-    const k = "hushdoc-session-id"
-    const existing = sessionStorage.getItem(k)
-    if (existing) return existing
-    const fresh = `web-${crypto.randomUUID()}`
-    sessionStorage.setItem(k, fresh)
-    return fresh
-  }, [])
-
   // Lifted state.
   const [scope, setScope] = useState<string[] | null>(null)
   const chatRef = useRef<ChatPaneHandle>(null)
   const voice = useVoice()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
+  // Active conversation id, persisted per-tab. null = empty / new-chat
+  // state where typing the first message will auto-create a conv.
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(
+    () => {
+      try {
+        return sessionStorage.getItem(ACTIVE_CONV_KEY) || null
+      } catch {
+        return null
+      }
+    },
+  )
+  useEffect(() => {
+    try {
+      if (activeConversationId)
+        sessionStorage.setItem(ACTIVE_CONV_KEY, activeConversationId)
+      else sessionStorage.removeItem(ACTIVE_CONV_KEY)
+    } catch {
+      /* ignore */
+    }
+  }, [activeConversationId])
+
+  const { create: createConv, applyTitleEvent, list: convList } =
+    useConversations()
+
+  // If the persisted active id refers to a conv that's been deleted
+  // since the last load, drop it on first list-fetch.
+  useEffect(() => {
+    if (!activeConversationId || !convList.data) return
+    if (!convList.data.some((c) => c.id === activeConversationId)) {
+      setActiveConversationId(null)
+    }
+  }, [activeConversationId, convList.data])
+
+  // Suppress hydration for a freshly-created conv ONCE — otherwise the
+  // hydration fetch races with the in-flight optimistic send and wipes
+  // the user/assistant messages we just appended locally.
+  const [skipHydrationFor, setSkipHydrationFor] = useState<string | null>(null)
+
+  const handleEnsureConversation = useCallback(async () => {
+    const conv = await createConv.mutateAsync(undefined)
+    setSkipHydrationFor(conv.id)
+    setActiveConversationId(conv.id)
+    return conv.id
+  }, [createConv])
+
+  const handleCreateNewChat = useCallback(() => {
+    // ChatGPT-style "+ New chat": just clear the active id; an empty
+    // pane is shown, and the first send will create the conv lazily.
+    voice.stopPlayback()
+    setActiveConversationId(null)
+    setDrawerOpen(false)
+  }, [voice])
+
+  const handleSelectConversation = useCallback((id: string) => {
+    voice.stopPlayback()
+    setActiveConversationId(id)
+    setDrawerOpen(false)
+  }, [voice])
+
   // Global keyboard shortcuts.
   useKeyboardShortcuts({
     onFocusInput: () => chatRef.current?.focusInput(),
-    onClearChat: () => chatRef.current?.clear(),
+    onClearChat: handleCreateNewChat,
     onEscape: () => chatRef.current?.cancel(),
   })
 
@@ -140,10 +192,9 @@ function Shell() {
             </SheetTrigger>
             <SheetContent side="left" className="p-0">
               <SidebarContent
-                onClearChat={() => {
-                  chatRef.current?.clear()
-                  setDrawerOpen(false)
-                }}
+                activeConversationId={activeConversationId}
+                onSelectConversation={handleSelectConversation}
+                onCreateConversation={handleCreateNewChat}
                 onScopeChange={setScope}
                 voice={voice}
               />
@@ -172,14 +223,20 @@ function Shell() {
 
       <main className="flex min-h-0 flex-1">
         <Sidebar
-          onClearChat={() => chatRef.current?.clear()}
+          activeConversationId={activeConversationId}
+          onSelectConversation={handleSelectConversation}
+          onCreateConversation={handleCreateNewChat}
           onScopeChange={setScope}
           voice={voice}
         />
         <div className="flex min-w-0 flex-1">
           <ChatPane
             ref={chatRef}
-            sessionId={sessionId}
+            conversationId={activeConversationId}
+            onEnsureConversation={handleEnsureConversation}
+            onTitleEvent={applyTitleEvent}
+            skipHydrationFor={skipHydrationFor}
+            onHydrationConsumed={() => setSkipHydrationFor(null)}
             scope={scope}
             voice={voice}
           />

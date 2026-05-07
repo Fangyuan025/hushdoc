@@ -18,7 +18,21 @@ import { ChatInput } from "./ChatInput"
 import { ChatMessage } from "./ChatMessage"
 
 interface ChatPaneProps {
-  sessionId: string
+  /** Active persistent conversation id, or null when the user is on
+   *  the empty / "new chat" state. */
+  conversationId: string | null
+  /** Called by ChatPane when the user sends the first message of a
+   *  brand-new chat — the parent creates a conversation server-side
+   *  and reports the new id back so ChatPane can resume the send. */
+  onEnsureConversation: () => Promise<string>
+  /** Called when the backend's auto-title SSE event arrives so the
+   *  sidebar can update without a full refetch. */
+  onTitleEvent?: (conversationId: string, title: string) => void
+  /** Conv id whose hydration fetch should be skipped this render
+   *  (set to the freshly-created id by the auto-create flow). */
+  skipHydrationFor?: string | null
+  /** Fires once after a suppressed hydration so the parent can reset. */
+  onHydrationConsumed?: () => void
   scope?: string[] | null
   voice: ReturnType<typeof useVoice>
 }
@@ -30,7 +44,15 @@ export interface ChatPaneHandle {
 }
 
 export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
-  function ChatPane({ sessionId, scope, voice }, ref) {
+  function ChatPane({
+    conversationId,
+    onEnsureConversation,
+    onTitleEvent,
+    skipHydrationFor,
+    onHydrationConsumed,
+    scope,
+    voice,
+  }, ref) {
     // After each completed assistant turn, cache the FULL synthesised
     // audio on the message so the 🔊 replay button works. This is a
     // background fetch — the streaming-TTS pipeline already played the
@@ -58,7 +80,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
 
     const { messages, send, stop, clear, streaming, error, patchMessage } =
       useChat({
-        sessionId,
+        conversationId,
         scope,
         onDone,
         // Sentence-by-sentence streaming TTS: enqueue each completed
@@ -68,6 +90,9 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
         // "synthesise after done" approach left.
         onSentence: voice.feedStreamingTTS,
         onStreamComplete: voice.finishStreamingTTS,
+        onTitle: onTitleEvent,
+        skipHydrationFor,
+        onHydrationConsumed,
       })
 
     const attachAudioRef = useRef<(id: string, url: string) => void>(
@@ -103,20 +128,31 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
     )
 
     // Wrap send so any in-flight TTS for the previous answer is killed
-    // before a new turn starts — otherwise the old answer keeps reading
-    // aloud over the user's new question.
+    // before a new turn starts. If there's no active conversation yet
+    // (user just clicked "+ New chat" or we're at first launch), ask
+    // the parent to create one server-side and use the freshly-minted
+    // id directly — bypassing React's setState propagation lag.
     const sendWithCancel = useCallback(
-      (text: string) => {
+      async (text: string) => {
         voice.stopPlayback()
-        send(text)
+        let id = conversationId
+        if (!id) {
+          try {
+            id = await onEnsureConversation()
+          } catch {
+            // onEnsureConversation already toasts on failure
+            return
+          }
+        }
+        await send(text, { conversationId: id })
       },
-      [voice, send],
+      [conversationId, onEnsureConversation, send, voice],
     )
 
     // Voice input — once VAD stops + transcribe returns, send immediately.
     const startVoice = useCallback(async () => {
       const text = await voice.record()
-      if (text) sendWithCancel(text)
+      if (text) await sendWithCancel(text)
     }, [voice, sendWithCancel])
 
     return (

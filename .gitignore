@@ -1,5 +1,6 @@
 # Local data + artifacts
 chroma_db/
+chat_history/
 data/uploads/
 eval_results/
 models/*.gguf

@@ -601,6 +601,57 @@ class RAGChain:
             self._sessions[session_id] = InMemoryChatMessageHistory()
         return self._sessions[session_id]
 
+    def hydrate_session(
+        self,
+        session_id: str,
+        messages: List[Dict[str, str]],
+    ) -> None:
+        """Replace the in-memory chat history for ``session_id`` with the
+        given list of ``{role, content}`` dicts. Used to load a saved
+        conversation from disk so the rewriter / chat memory carry the
+        right context across server restarts."""
+        history = self._get_session_history(session_id)
+        history.clear()
+        for m in messages:
+            role = m.get("role")
+            content = m.get("content") or ""
+            if not content:
+                continue
+            if role == "user":
+                history.add_user_message(content)
+            elif role == "assistant":
+                history.add_ai_message(content)
+
+    def generate_title(self, user_msg: str, assistant_msg: str) -> str:
+        """Ask the local LLM for a short title summarising the first turn
+        of a conversation. Used for auto-titles in the sidebar list."""
+        if not user_msg.strip():
+            return "New chat"
+        prompt_text = (
+            f"{QWEN3_NO_THINK}\n"
+            "Generate a concise title (4 to 6 words, no quotes, no "
+            "trailing period) summarising this conversation. Reply in the "
+            "SAME language as the user's message.\n\n"
+            f"User: {user_msg[:600]}\n"
+            f"Assistant: {(assistant_msg or '')[:600]}\n\n"
+            "Title:"
+        )
+        try:
+            resp = self.llm.invoke([
+                SystemMessage(content=QWEN3_NO_THINK),
+                HumanMessage(content=prompt_text),
+            ])
+            text = getattr(resp, "content", str(resp)) or ""
+            cleaned = self._strip_reasoning(text).strip()
+            # Drop quotes / Markdown emphasis the model loves to add.
+            cleaned = re.sub(r"^[\"'`*]+|[\"'`*.!?]+$", "", cleaned).strip()
+            # Clip to first line, max 80 chars.
+            cleaned = cleaned.splitlines()[0][:80] if cleaned else ""
+            return cleaned or "New chat"
+        except Exception:
+            logger.exception("Auto-title generation failed.")
+            return "New chat"
+
     def reset_session(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
 

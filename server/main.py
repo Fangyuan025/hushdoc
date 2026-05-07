@@ -29,13 +29,20 @@ from sse_starlette.sse import EventSourceResponse
 
 import doc_summaries
 from server import deps
+from server.conversations import default_store as conv_store
 from server.schemas import (
     ChatClearRequest,
     ChatClearResponse,
     ChatRequest,
+    ConversationDetail,
+    ConversationMessage,
+    ConversationMeta,
+    ConversationsListResponse,
+    CreateConversationRequest,
     DeleteDocumentsResponse,
     DocumentsResponse,
     HealthResponse,
+    RenameConversationRequest,
     VoiceHealthResponse,
     VoiceSynthesizeRequest,
     VoiceTranscribeResponse,
@@ -211,21 +218,150 @@ async def upload_documents(
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     """Streaming RAG turn. Emits SSE events:
-        standalone, sources, token, done, error
+        standalone, sources, token, done, error, [title]
     The React client uses ``EventSource`` to consume these by event name.
+
+    When ``conversation_id`` is provided, the user/assistant messages are
+    persisted to ``./chat_history/<id>.json`` and (on the first turn) an
+    auto-title is generated and emitted as a ``title`` event so the
+    sidebar can update without a separate roundtrip.
     """
     if not req.question or not req.question.strip():
         raise HTTPException(status_code=400, detail="question is empty")
 
     chain = deps.get_chain()
+    # The chain memory key: prefer a real conversation id when present so
+    # different convs keep separate rewriter / chat-history state.
+    memory_key = req.conversation_id or req.session_id
+
+    conv_before = None
+    if req.conversation_id:
+        conv_before = conv_store.get(req.conversation_id)
+        if conv_before is None:
+            raise HTTPException(
+                status_code=404, detail=f"conversation {req.conversation_id} not found",
+            )
+        # Hydrate the chain's in-memory chat history from disk so the
+        # rewriter and follow-up boost see the right context even after
+        # a server restart.
+        chain.hydrate_session(memory_key, conv_before.get("messages", []))
+
     events = chain.stream(
         req.question,
-        session_id=req.session_id,
+        session_id=memory_key,
         filenames=req.filenames or None,
     )
+
+    async def _augment_with_persistence():
+        """Wrap the chain SSE stream with side-effects:
+        1. Forward every event to the client unchanged.
+        2. When the 'done' event fires, persist user+assistant messages.
+        3. If this was the conversation's first turn, generate a title
+           and emit a 'title' event before closing the stream.
+        """
+        final_answer = ""
+        async for ev in chain_stream_to_sse(events):
+            yield ev
+            if ev.get("event") == "done" and req.conversation_id:
+                try:
+                    import json as _json
+                    payload = _json.loads(ev["data"])
+                    final_answer = payload.get("answer", "") or ""
+                except Exception:
+                    final_answer = ""
+        if req.conversation_id and final_answer:
+            try:
+                conv_store.append_messages(
+                    req.conversation_id,
+                    [
+                        {"role": "user", "content": req.question},
+                        {"role": "assistant", "content": final_answer},
+                    ],
+                )
+                # Auto-title on the very first turn (now exactly 2 msgs).
+                refreshed = conv_store.get(req.conversation_id) or {}
+                msg_count = len(refreshed.get("messages", []))
+                current_title = refreshed.get("title", "")
+                if msg_count <= 2 and (not current_title or current_title == "New chat"):
+                    title = await asyncio.to_thread(
+                        chain.generate_title, req.question, final_answer,
+                    )
+                    conv_store.set_title(req.conversation_id, title)
+                    yield {
+                        "event": "title",
+                        "data": __import__("json").dumps(
+                            {"conversation_id": req.conversation_id, "title": title},
+                            ensure_ascii=False,
+                        ),
+                    }
+            except Exception:
+                logger.exception("Conversation persistence/title failed.")
+
     return EventSourceResponse(
-        chain_stream_to_sse(events),
+        _augment_with_persistence(),
         media_type="text/event-stream",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Conversations
+# ---------------------------------------------------------------------------
+@app.get("/api/conversations", response_model=ConversationsListResponse)
+def list_conversations() -> ConversationsListResponse:
+    metas = conv_store.list_metas()
+    return ConversationsListResponse(
+        conversations=[ConversationMeta(**m) for m in metas],
+    )
+
+
+@app.post("/api/conversations", response_model=ConversationDetail)
+def create_conversation(req: CreateConversationRequest) -> ConversationDetail:
+    conv = conv_store.create(title=req.title or "New chat")
+    return ConversationDetail(
+        id=conv["id"],
+        title=conv["title"],
+        created_at=conv["created_at"],
+        updated_at=conv["updated_at"],
+        messages=[],
+    )
+
+
+@app.get("/api/conversations/{conv_id}", response_model=ConversationDetail)
+def get_conversation(conv_id: str) -> ConversationDetail:
+    conv = conv_store.get(conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    return ConversationDetail(
+        id=conv["id"],
+        title=conv["title"],
+        created_at=conv["created_at"],
+        updated_at=conv["updated_at"],
+        messages=[ConversationMessage(**m) for m in conv.get("messages", [])],
+    )
+
+
+@app.delete("/api/conversations/{conv_id}")
+def delete_conversation(conv_id: str):
+    ok = conv_store.delete(conv_id)
+    # Also drop the in-memory chat history for this conv so the next
+    # creation with the same key starts clean.
+    chain = deps.get_chain_if_loaded()
+    if chain is not None:
+        chain.reset_session(conv_id)
+    return {"ok": ok}
+
+
+@app.patch("/api/conversations/{conv_id}", response_model=ConversationMeta)
+def rename_conversation(conv_id: str, req: RenameConversationRequest) -> ConversationMeta:
+    conv = conv_store.set_title(conv_id, req.title)
+    if not conv:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    return ConversationMeta(
+        id=conv["id"],
+        title=conv["title"],
+        created_at=conv["created_at"],
+        updated_at=conv["updated_at"],
+        message_count=len(conv.get("messages", [])),
     )
 
 

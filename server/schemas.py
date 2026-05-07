@@ -42,6 +42,10 @@ class DeleteDocumentsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 class ChatRequest(BaseModel):
     question: str
+    # Either conversation_id (preferred, persists to disk) or session_id
+    # (legacy, in-memory only). If conversation_id is set we use it as
+    # the chain memory key AND append messages to disk.
+    conversation_id: Optional[str] = None
     session_id: str = "default"
     filenames: Optional[List[str]] = Field(
         default=None,
@@ -56,6 +60,43 @@ class ChatClearRequest(BaseModel):
 
 class ChatClearResponse(BaseModel):
     ok: bool
+
+
+# ---------------------------------------------------------------------------
+# Conversations
+# ---------------------------------------------------------------------------
+class ConversationMeta(BaseModel):
+    id: str
+    title: str
+    created_at: float
+    updated_at: float
+    message_count: int
+
+
+class ConversationsListResponse(BaseModel):
+    conversations: List[ConversationMeta]
+
+
+class ConversationMessage(BaseModel):
+    role: str
+    content: str
+    ts: Optional[float] = None
+
+
+class ConversationDetail(BaseModel):
+    id: str
+    title: str
+    created_at: float
+    updated_at: float
+    messages: List[ConversationMessage]
+
+
+class CreateConversationRequest(BaseModel):
+    title: Optional[str] = None
+
+
+class RenameConversationRequest(BaseModel):
+    title: str
 
 
 # ---------------------------------------------------------------------------

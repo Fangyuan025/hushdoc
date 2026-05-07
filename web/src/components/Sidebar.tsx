@@ -2,12 +2,13 @@ import { useEffect, useState } from "react"
 import {
   Folder,
   Loader2,
-  MessageSquarePlus,
+  MessageSquare,
   Mic,
   Search,
   Trash2,
 } from "lucide-react"
 
+import { ConversationList } from "@/components/ConversationList"
 import { DocumentUpload } from "@/components/DocumentUpload"
 import { ScopeSelector } from "@/components/ScopeSelector"
 import { Button } from "@/components/ui/button"
@@ -18,14 +19,18 @@ import { useScope } from "@/hooks/useScope"
 import type { useVoice } from "@/hooks/useVoice"
 
 export interface SidebarProps {
-  onClearChat: () => void
+  activeConversationId: string | null
+  onSelectConversation: (id: string) => void
+  onCreateConversation: () => void
   onScopeChange: (scope: string[] | null) => void
   voice: ReturnType<typeof useVoice>
 }
 
 /** Inner content — shared between desktop sidebar and mobile drawer. */
 export function SidebarContent({
-  onClearChat,
+  activeConversationId,
+  onSelectConversation,
+  onCreateConversation,
   onScopeChange,
   voice,
 }: SidebarProps) {
@@ -46,6 +51,15 @@ export function SidebarContent({
     <div className="flex h-full min-h-0 w-full flex-col">
       <ScrollArea className="flex-1">
         <div className="space-y-5 p-4">
+          {/* Chats — at the top, ChatGPT-style. */}
+          <Section icon={<MessageSquare className="h-3.5 w-3.5" />} title="Chats">
+            <ConversationList
+              activeId={activeConversationId}
+              onSelect={onSelectConversation}
+              onCreate={onCreateConversation}
+            />
+          </Section>
+
           {/* Documents */}
           <Section
             icon={<Folder className="h-3.5 w-3.5" />}
@@ -101,18 +115,9 @@ export function SidebarContent({
         </div>
       </ScrollArea>
 
-      {/* Sticky bottom: chat + danger actions */}
+      {/* Sticky bottom: only the danger zone. "New chat" + per-chat
+          delete now live in the ConversationList at the top. */}
       <div className="space-y-2 border-t bg-card/50 p-3">
-        <Button
-          size="sm"
-          variant="secondary"
-          className="w-full"
-          onClick={onClearChat}
-          title="Cmd/Ctrl + L"
-        >
-          <MessageSquarePlus className="h-3.5 w-3.5" />
-          New chat
-        </Button>
         {indexed.length > 0 &&
           (confirming ? (
             <div className="flex gap-1">
