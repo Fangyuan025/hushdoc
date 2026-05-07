@@ -118,8 +118,12 @@ You need:
 
 1. Create the Python venv (`.venv\`) and `pip install` everything
 2. Run `npm install` for the frontend
-3. Download `llama-server.exe` (latest CPU build from llama.cpp) into
-   `.\runtime\` — ~15 MB
+3. Detect whether you have an NVIDIA GPU and pick the right
+   `llama-server.exe` build into `.\runtime\`:
+   - **GPU detected:** CUDA 12.4 build (~205 MB) + matching cudart
+     runtime DLLs (~373 MB) — fast inference, drop-in for larger models
+   - **No GPU:** CPU build (~15 MB) — works everywhere, plenty fast for
+     the default 1.7B model
 4. Download the default model **Qwen3-1.7B Q4_K_M** (~1.2 GB) from
    [HuggingFace](https://huggingface.co/MaziyarPanahi/Qwen3-1.7B-GGUF)
    into `.\models\model.gguf`
@@ -127,10 +131,13 @@ You need:
 Each step skips itself if it's already done, so you can re-run setup
 safely after `git pull`.
 
-> **Have an NVIDIA GPU?** Run `.\setup.bat -GpuBuild` to download the
-> CUDA 12.4 build of llama-server instead of the CPU one. Same model
-> file, just much faster inference for larger models. (CUDA runtime
-> needs to be installed on your system.)
+> **Override the GPU/CPU pick:**
+> - `.\setup.bat -Cpu` forces the CPU build (smaller download, useful
+>   if your CUDA install is broken).
+> - `.\setup.bat -GpuBuild` forces the CUDA build even when `nvidia-smi`
+>   isn't on PATH.
+> - `.\setup.bat -Force` re-downloads the runtime and model (e.g. after
+>   a llama.cpp upgrade). Does **not** recreate the venv.
 
 ### Want a different / larger model?
 

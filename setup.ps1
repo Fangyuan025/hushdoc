@@ -4,13 +4,25 @@
 # launch: Python venv, pip install, npm install, llama-server binary,
 # and a default GGUF model. Each step is idempotent -- safe to re-run.
 #
+# llama.cpp build selection (no flags, default behavior):
+#   - If `nvidia-smi` is on PATH and reports a working GPU, download the
+#     CUDA 12.4 build of llama-server PLUS the matching cudart bundle so
+#     the binary has every DLL it needs to start.
+#   - Otherwise, fall back to the CPU build (~15 MB) which works on every
+#     machine but is slower for big models.
+#
 # Flags:
-#   -GpuBuild  Download the CUDA 12.4 build of llama-server instead of the
-#              CPU-only build. Only useful if you have an NVIDIA GPU AND
-#              the matching CUDA runtime installed.
-#   -Force     Re-download everything even if it already looks present.
+#   -Cpu       Force the CPU build even if an NVIDIA GPU is detected.
+#              Use this if your CUDA install is broken or you just want
+#              a smaller download.
+#   -GpuBuild  Force the CUDA build even if nvidia-smi is missing.
+#              Useful when CUDA is installed but nvidia-smi is not on PATH.
+#   -Force     Re-download the llama-server runtime AND the GGUF model
+#              even if they're already on disk. (Does NOT recreate the
+#              venv or re-run npm install -- those are idempotent.)
 
 param(
+    [switch]$Cpu,
     [switch]$GpuBuild,
     [switch]$Force
 )
@@ -55,7 +67,10 @@ Write-Host ""
 # ===========================================================================
 $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 
-if ((Test-Path $venvPython) -and (-not $Force)) {
+# -Force does NOT recreate the venv: it would be destructive (deleting any
+# manually-installed local packages) AND slow, and pip install is already
+# idempotent for the requirements.txt path below.
+if (Test-Path $venvPython) {
     Write-Skip "Python venv already exists at .\.venv -- skipping create."
 } else {
     Write-Step "Creating Python 3.12 virtual environment in .\.venv ..."
@@ -86,7 +101,7 @@ Write-Host ""
 # 2. npm install
 # ===========================================================================
 $webDir = Join-Path $root "web"
-if ((Test-Path (Join-Path $webDir "node_modules")) -and (-not $Force)) {
+if (Test-Path (Join-Path $webDir "node_modules")) {
     Write-Skip "web\node_modules already exists -- skipping npm install."
 } else {
     Need-Tool "npm" "Install Node.js 20+ from https://nodejs.org/ (LTS is fine)."
@@ -107,17 +122,45 @@ Write-Host ""
 # ===========================================================================
 # 3. llama-server binary
 #
-# Default: CPU-only build (works on every machine, no CUDA driver hassle).
-# Qwen3-1.7B Q4_K_M is small enough that CPU inference is fine on a modern
-# laptop. Pass -GpuBuild if you have an NVIDIA GPU and want CUDA 12.4
-# acceleration -- you'll need the matching CUDA runtime installed too.
+# Auto-pick CUDA build if an NVIDIA GPU is present (much faster), else CPU.
+# `-Cpu` and `-GpuBuild` flags override the detection.
+#
+# For the CUDA path we ALSO download the matching cudart bundle and unpack
+# it next to llama-server.exe -- the binary loads cudart64_*.dll at startup
+# and most users don't have those system-wide unless they installed CUDA
+# Toolkit.
 # ===========================================================================
 $runtimeDir = Join-Path $root "runtime"
 $serverExe = Join-Path $runtimeDir "llama-server.exe"
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 
+# --- Decide CPU vs GPU ---
+function Test-NvidiaGpu {
+    $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if (-not $smi) { return $false }
+    & nvidia-smi -L *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+if ($Cpu) {
+    $useGpu = $false
+    $kind = "CPU (forced)"
+} elseif ($GpuBuild) {
+    $useGpu = $true
+    $kind = "CUDA 12.x (forced)"
+} elseif (Test-NvidiaGpu) {
+    $useGpu = $true
+    $kind = "CUDA 12.x (auto-detected NVIDIA GPU)"
+    Write-Step "NVIDIA GPU detected via nvidia-smi -- using the CUDA build."
+} else {
+    $useGpu = $false
+    $kind = "CPU (no NVIDIA GPU detected)"
+    Write-Step "No NVIDIA GPU detected -- using the CPU build."
+    Write-Host "         If you DO have an NVIDIA GPU, re-run with -GpuBuild." -ForegroundColor DarkGray
+}
+
 if ((Test-Path $serverExe) -and (-not $Force)) {
-    Write-Skip "runtime\llama-server.exe already exists -- skipping download."
+    Write-Skip "runtime\llama-server.exe already exists -- skipping download. ($kind)"
 } else {
     Write-Step "Looking up the latest llama.cpp release on GitHub..."
     try {
@@ -136,50 +179,68 @@ if ((Test-Path $serverExe) -and (-not $Force)) {
     # Patterns must keep the leading `llama-` so we don't accidentally pick
     # cudart-llama-bin-... which is just the CUDA runtime DLL bundle, not
     # the actual binaries.
-    if ($GpuBuild) {
+    if ($useGpu) {
         # Match e.g. llama-bXXXX-bin-win-cuda-12.4-x64.zip
-        $pattern = "llama-*-bin-win-cuda-*-x64.zip"
-        $kind = "CUDA 12.x"
+        # Prefer 12.4 specifically (broadest compat); fall back to any cuda.
+        $binPattern = "llama-*-bin-win-cuda-12.4-x64.zip"
+        $cudartPattern = "cudart-llama-bin-win-cuda-12.4-x64.zip"
     } else {
         # Match e.g. llama-bXXXX-bin-win-cpu-x64.zip
-        $pattern = "llama-*-bin-win-cpu-x64.zip"
-        $kind = "CPU"
+        $binPattern = "llama-*-bin-win-cpu-x64.zip"
+        $cudartPattern = $null
     }
 
-    $asset = $release.assets | Where-Object { $_.name -like $pattern } | Select-Object -First 1
-    if (-not $asset) {
-        Write-Fail "Couldn't find a $kind Windows build in release $($release.tag_name)."
+    $binAsset = $release.assets | Where-Object { $_.name -like $binPattern } | Select-Object -First 1
+    if (-not $binAsset -and $useGpu) {
+        # 12.4 not present in this release -- try any cuda variant.
+        $binAsset = $release.assets | Where-Object { $_.name -like "llama-*-bin-win-cuda-*-x64.zip" } | Select-Object -First 1
+    }
+    if (-not $binAsset) {
+        Write-Fail "Couldn't find a matching Windows build in release $($release.tag_name)."
         Write-Host "         Asset names available:"
         $release.assets | ForEach-Object { Write-Host "           - $($_.name)" }
         Read-Host "Press Enter to close"
         exit 1
     }
 
-    $zipPath = Join-Path $runtimeDir "llama-cpp.zip"
-    Write-Step "Downloading $($asset.name) ($([math]::Round($asset.size/1MB,1)) MB) ..."
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+    function Download-And-Unpack($url, $name, $sizeBytes) {
+        $zipPath = Join-Path $runtimeDir $name
+        $tmpExtract = Join-Path $runtimeDir "_extract"
+        Write-Step "Downloading $name ($([math]::Round($sizeBytes/1MB,1)) MB) ..."
+        Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+        Write-Step "Extracting $name ..."
+        if (Test-Path $tmpExtract) { Remove-Item -Recurse -Force $tmpExtract }
+        Expand-Archive -Path $zipPath -DestinationPath $tmpExtract -Force
+        # Copy every file that landed in the extract dir (and its subdirs)
+        # into .\runtime, flattening only the top archive directory.
+        $srcRoot = Get-ChildItem -Path $tmpExtract -Directory | Select-Object -First 1
+        if (-not $srcRoot) { $srcRoot = Get-Item $tmpExtract }
+        Copy-Item -Path (Join-Path $srcRoot.FullName "*") -Destination $runtimeDir -Recurse -Force
+        Remove-Item -Recurse -Force $tmpExtract
+        Remove-Item -Force $zipPath
+    }
 
-    Write-Step "Extracting llama-server.exe ..."
-    $tmpExtract = Join-Path $runtimeDir "_extract"
-    if (Test-Path $tmpExtract) { Remove-Item -Recurse -Force $tmpExtract }
-    Expand-Archive -Path $zipPath -DestinationPath $tmpExtract -Force
+    Download-And-Unpack $binAsset.browser_download_url $binAsset.name $binAsset.size
 
-    $found = Get-ChildItem -Path $tmpExtract -Recurse -Filter "llama-server.exe" |
-        Select-Object -First 1
-    if (-not $found) {
+    if ($useGpu) {
+        $cudartAsset = $release.assets | Where-Object { $_.name -like $cudartPattern } | Select-Object -First 1
+        if (-not $cudartAsset) {
+            $cudartAsset = $release.assets | Where-Object { $_.name -like "cudart-llama-bin-win-cuda-*-x64.zip" } | Select-Object -First 1
+        }
+        if ($cudartAsset) {
+            Download-And-Unpack $cudartAsset.browser_download_url $cudartAsset.name $cudartAsset.size
+        } else {
+            Write-Warn "cudart bundle not found in this release. If llama-server fails to start with"
+            Write-Warn "a 'missing cudart64_*.dll' error, install CUDA Toolkit 12.x or pass -Cpu."
+        }
+    }
+
+    if (-not (Test-Path $serverExe)) {
         Write-Fail "llama-server.exe not found inside the downloaded archive."
         Read-Host "Press Enter to close"
         exit 1
     }
-
-    # Copy llama-server.exe AND every .dll alongside it (CUDA runtime,
-    # ggml shared libs, etc.) into .\runtime so the binary can find them.
-    $srcDir = $found.Directory.FullName
-    Copy-Item -Path (Join-Path $srcDir "*") -Destination $runtimeDir -Recurse -Force
-
-    Remove-Item -Recurse -Force $tmpExtract
-    Remove-Item -Force $zipPath
-    Write-Ok "llama-server installed at .\runtime\llama-server.exe ($kind build, $($release.tag_name))."
+    Write-Ok "llama-server installed at .\runtime\llama-server.exe ($kind, $($release.tag_name))."
 }
 Write-Host ""
 
