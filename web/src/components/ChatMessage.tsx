@@ -1,4 +1,5 @@
-import { User, Sparkles, Volume2 } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Loader2, User, Sparkles, Volume2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
@@ -14,6 +15,31 @@ import { Sources } from "./Sources"
 // at the actual last text position — even mid-paragraph, mid-list, or
 // mid-code-block — which is what the user expects from a typewriter.
 const STREAMING_CURSOR = "▍"
+
+/**
+ * Loading indicator shown in the assistant bubble while it's streaming
+ * but no tokens have arrived yet. After 5s of silence, switches to a
+ * "warming up the model" hint — covers cold-start where llama-server
+ * is being spawned and the embedding model is being loaded for the
+ * first time, which can take 30-60s on a fresh boot.
+ */
+function StreamingPlaceholder() {
+  const [showColdStartHint, setShowColdStartHint] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setShowColdStartHint(true), 5_000)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <div className="flex items-center gap-2 text-muted-foreground">
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      <span className="text-sm">
+        {showColdStartHint
+          ? "Warming up the model — first run takes ~30 s on cold boot."
+          : "Generating response…"}
+      </span>
+    </div>
+  )
+}
 
 interface ChatMessageProps {
   msg: Msg
@@ -36,10 +62,13 @@ export function ChatMessage({ msg, onReplay }: ChatMessageProps) {
       <div className={cn("max-w-[78ch] min-w-0", isUser && "order-1")}>
         <div
           className={cn(
-            "rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
+            "text-[15px] leading-relaxed",
+            // User messages get a chat bubble; assistant messages render
+            // inline (ChatGPT-style) so prose, code blocks, and tables
+            // can breathe edge-to-edge.
             isUser
-              ? "bg-primary text-primary-foreground"
-              : "bg-card border border-border",
+              ? "rounded-2xl bg-primary px-4 py-2.5 text-primary-foreground"
+              : "py-0.5",
           )}
         >
           {isUser ? (
@@ -56,7 +85,7 @@ export function ChatMessage({ msg, onReplay }: ChatMessageProps) {
                     : msg.content}
                 </ReactMarkdown>
               ) : msg.streaming ? (
-                <span className="text-muted-foreground">…</span>
+                <StreamingPlaceholder />
               ) : null}
             </div>
           )}

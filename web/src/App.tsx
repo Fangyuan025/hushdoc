@@ -102,6 +102,44 @@ function Shell() {
     document.documentElement.classList.toggle("dark", dark)
   }, [dark])
 
+  // Pre-warm the backend on app boot so the user's first message
+  // doesn't sit on "..." for 30-60s while the embedding model and
+  // llama-server.exe spin up. /api/chat/clear is the cheapest call
+  // that exercises both via deps.get_chain().
+  useEffect(() => {
+    fetch("/api/chat/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: "__warmup__" }),
+    }).catch(() => {
+      /* warmup is best-effort; first send will retry the load */
+    })
+  }, [])
+
+  // Heartbeat: pings the backend every 5 s while the tab is open. The
+  // launcher's auto-shutdown watchdog uses this to detect that the user
+  // has closed the browser — when heartbeats stop for ~15 s the backend
+  // self-exits, the launcher's wait loop unblocks, and its cleanup
+  // prompt fires. A `sendBeacon` on `pagehide` covers the close-tab
+  // case so the watchdog notices within the first 5 s of silence.
+  useEffect(() => {
+    const ping = () => {
+      // Only ping when the document is visible — backgrounded tabs
+      // throttle setInterval anyway, and the watchdog grace window of
+      // 15 s tolerates short visibility gaps.
+      if (document.visibilityState === "hidden") return
+      void fetch("/api/heartbeat", { method: "POST" }).catch(() => {})
+    }
+    ping()
+    const id = window.setInterval(ping, 5_000)
+    const onShow = () => ping()
+    document.addEventListener("visibilitychange", onShow)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener("visibilitychange", onShow)
+    }
+  }, [])
+
   // Lifted state.
   const [scope, setScope] = useState<string[] | null>(null)
   const chatRef = useRef<ChatPaneHandle>(null)

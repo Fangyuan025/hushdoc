@@ -17,8 +17,11 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import shutil
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -418,3 +421,55 @@ async def voice_synthesize(req: VoiceSynthesizeRequest):
     if not wav_bytes:
         raise HTTPException(status_code=500, detail="synthesis returned empty audio")
     return Response(content=wav_bytes, media_type="audio/wav")
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat watchdog
+#
+# The frontend POSTs /api/heartbeat every few seconds while the tab is open.
+# If the server stops hearing pings for HEARTBEAT_TIMEOUT_S seconds AFTER it
+# has received at least one (i.e. the user actually opened the app at least
+# once this run), the process self-exits. The launcher (hushdoc.bat) sees
+# the backend exit and falls into its cleanup-prompt flow.
+#
+# Disabled by default if HUSHDOC_AUTO_SHUTDOWN=0, so plain `dev.sh` /
+# `uvicorn` workflows aren't ambushed by it.
+# ---------------------------------------------------------------------------
+HEARTBEAT_TIMEOUT_S = float(os.environ.get("HUSHDOC_HEARTBEAT_TIMEOUT", "15"))
+_AUTO_SHUTDOWN_ENABLED = os.environ.get("HUSHDOC_AUTO_SHUTDOWN", "1") != "0"
+_heartbeat_state = {"last_ts": 0.0, "ever_received": False}
+
+
+@app.post("/api/heartbeat")
+def heartbeat() -> dict:
+    """Frontend ping. Resets the auto-shutdown timer."""
+    _heartbeat_state["last_ts"] = time.time()
+    _heartbeat_state["ever_received"] = True
+    return {"ok": True}
+
+
+async def _heartbeat_watchdog() -> None:
+    """Background loop: once the first heartbeat has arrived, exit if the
+    stream goes silent for too long. Sleeps 3s between checks so detection
+    latency is bounded by HEARTBEAT_TIMEOUT_S + 3s."""
+    while True:
+        await asyncio.sleep(3)
+        if not _heartbeat_state["ever_received"]:
+            continue
+        elapsed = time.time() - _heartbeat_state["last_ts"]
+        if elapsed > HEARTBEAT_TIMEOUT_S:
+            logger.info(
+                "No heartbeat for %.1fs (timeout=%.0fs) — auto-shutdown.",
+                elapsed, HEARTBEAT_TIMEOUT_S,
+            )
+            # Defer the actual exit a tick so the current tick of the event
+            # loop can return cleanly. os._exit avoids hanging on lingering
+            # SSE connections / atexit handlers that block on I/O.
+            threading.Timer(0.3, lambda: os._exit(0)).start()
+            return
+
+
+@app.on_event("startup")
+async def _start_watchdog() -> None:
+    if _AUTO_SHUTDOWN_ENABLED:
+        asyncio.create_task(_heartbeat_watchdog())

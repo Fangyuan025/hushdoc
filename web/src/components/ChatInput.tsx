@@ -85,9 +85,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
         )}
       </div>
       <div className="mx-auto mt-1.5 max-w-3xl text-center text-[10px] text-muted-foreground/70">
-        Hushdoc runs entirely on your machine. Press Enter to send,
-        Shift+Enter for newline · Cmd/Ctrl+K focus, Cmd/Ctrl+L new chat,
-        Esc to stop.
+        Hushdoc runs entirely on your machine — nothing leaves it.
       </div>
     </div>
   )

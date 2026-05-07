@@ -1,0 +1,185 @@
+# Hushdoc one-click launcher (PowerShell, called from start.bat).
+#
+# 1. Validate the venv + node_modules; auto-run `npm install` if missing.
+# 2. Spawn FastAPI (uvicorn) on :8000 and Vite on :5173 as child processes.
+# 3. Wait for both to bind their ports, then open the default browser.
+# 4. Block until the user presses Ctrl+C OR either child exits.
+# 5. Kill every descendant including the lazy-spawned llama-server.exe.
+# 6. Prompt the user whether to wipe chat_history / data/uploads /
+#    chroma_db, then exit. Each category is a separate yes/no so the
+#    user can keep, e.g., uploaded documents but clear conversations.
+#
+#   .\start.ps1            # default
+#   .\start.ps1 -NoOpen    # skip auto-open of the browser
+
+param([switch]$NoOpen)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $MyInvocation.MyCommand.Definition
+Set-Location $root
+
+function Write-Step($msg) { Write-Host "[hushdoc] $msg" -ForegroundColor Cyan }
+function Write-Warn($msg) { Write-Host "[hushdoc] $msg" -ForegroundColor Yellow }
+function Write-Ok($msg)   { Write-Host "[hushdoc] $msg" -ForegroundColor Green }
+
+# ---------------------------------------------------------------------------
+# 0. Sanity check the environment.
+# ---------------------------------------------------------------------------
+$venvPython = Join-Path $root ".venv\Scripts\python.exe"
+if (-not (Test-Path $venvPython)) {
+    Write-Host ""
+    Write-Host "[hushdoc] ERROR: Python venv not found at $venvPython" -ForegroundColor Red
+    Write-Host "         Create it with:" -ForegroundColor Red
+    Write-Host "           py -3.12 -m venv .venv"
+    Write-Host "           .venv\Scripts\pip install -r requirements.txt"
+    Write-Host ""
+    Read-Host "Press Enter to close"
+    exit 1
+}
+
+$webDir = Join-Path $root "web"
+if (-not (Test-Path (Join-Path $webDir "node_modules"))) {
+    Write-Warn "web\node_modules missing -- running 'npm install' (one-time)..."
+    Push-Location $webDir
+    npm install
+    if ($LASTEXITCODE -ne 0) {
+        Pop-Location
+        Write-Host "[hushdoc] ERROR: npm install failed." -ForegroundColor Red
+        Read-Host "Press Enter to close"
+        exit 1
+    }
+    Pop-Location
+}
+
+# ---------------------------------------------------------------------------
+# 1. Spawn backend + frontend.
+# ---------------------------------------------------------------------------
+Write-Step "starting FastAPI backend on http://localhost:8000 ..."
+$backend = Start-Process -FilePath $venvPython `
+    -ArgumentList "-m","uvicorn","server.main:app","--port","8000" `
+    -WorkingDirectory $root -PassThru -NoNewWindow
+
+# `npm run dev` on Windows is actually npm.cmd, which spawns a node child;
+# we stash both PIDs so cleanup can reach the real Vite process via the
+# job tree later.
+Write-Step "starting Vite frontend on http://localhost:5173 ..."
+$frontend = Start-Process -FilePath "cmd.exe" `
+    -ArgumentList "/c","npm run dev" `
+    -WorkingDirectory $webDir -PassThru -NoNewWindow
+
+# ---------------------------------------------------------------------------
+# 2. Wait for both ports to bind, then open the browser.
+# ---------------------------------------------------------------------------
+function Wait-ForPort([int]$port, [int]$timeoutSec = 60) {
+    $deadline = (Get-Date).AddSeconds($timeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $listening = Get-NetTCPConnection -State Listen `
+            -LocalPort $port -ErrorAction SilentlyContinue
+        if ($listening) { return $true }
+        Start-Sleep -Milliseconds 250
+    }
+    return $false
+}
+
+if (-not (Wait-ForPort 5173 60)) {
+    Write-Warn "Vite did not come up within 60s; continuing anyway."
+}
+if (-not (Wait-ForPort 8000 60)) {
+    Write-Warn "FastAPI did not come up within 60s; continuing anyway."
+}
+
+if (-not $NoOpen) {
+    Write-Ok "opening http://localhost:5173 in your default browser"
+    Start-Process "http://localhost:5173/"
+}
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor DarkGray
+Write-Host "  Hushdoc is running." -ForegroundColor White
+Write-Host "  Press Ctrl+C in this window (or just close it) to stop." -ForegroundColor White
+Write-Host "============================================================" -ForegroundColor DarkGray
+Write-Host ""
+
+# ---------------------------------------------------------------------------
+# 3. Block until either child exits or the user hits Ctrl+C.
+#    (Ctrl+C lands in `finally` because we wired Stop on the cmdlet level.)
+# ---------------------------------------------------------------------------
+try {
+    while (-not $backend.HasExited -and -not $frontend.HasExited) {
+        Start-Sleep -Milliseconds 500
+    }
+    if ($backend.HasExited) {
+        Write-Warn "backend exited (code=$($backend.ExitCode)); shutting down."
+    } elseif ($frontend.HasExited) {
+        Write-Warn "frontend exited (code=$($frontend.ExitCode)); shutting down."
+    }
+} finally {
+    # -----------------------------------------------------------------------
+    # 4. Kill every descendant. Order matters:
+    #    a) terminate vite/uvicorn process trees by PID,
+    #    b) sweep llama-server.exe (spawned lazily by the chain),
+    #    c) sweep any orphan node.exe / python.exe that match our cwd.
+    # -----------------------------------------------------------------------
+    Write-Host ""
+    Write-Step "stopping..."
+
+    function Stop-ProcessTree([int]$pid_) {
+        try {
+            $children = Get-CimInstance Win32_Process `
+                -Filter "ParentProcessId=$pid_" -ErrorAction SilentlyContinue
+            foreach ($c in $children) { Stop-ProcessTree $c.ProcessId }
+            Stop-Process -Id $pid_ -Force -ErrorAction SilentlyContinue
+        } catch { }
+    }
+
+    foreach ($p in @($frontend, $backend)) {
+        if ($p) { Stop-ProcessTree $p.Id }
+    }
+
+    # llama-server.exe was spawned with DETACHED_PROCESS so it isn't a
+    # descendant of either tracked PID -- sweep by name.
+    Get-Process -Name "llama-server" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    Write-Ok "all processes stopped."
+
+    # -----------------------------------------------------------------------
+    # 5. Cleanup prompts. Each category is independent and only offered if
+    #    the directory actually exists with content, so a fresh install
+    #    doesn't pester the user.
+    # -----------------------------------------------------------------------
+    function Confirm-Cleanup($label, $path) {
+        if (-not (Test-Path $path)) { return }
+        $items = Get-ChildItem -LiteralPath $path -Force `
+            -ErrorAction SilentlyContinue
+        if (-not $items -or $items.Count -eq 0) { return }
+        Write-Host ""
+        $ans = Read-Host "Delete $label ($path, $($items.Count) item(s))? [y/N]"
+        if ($ans -match '^(y|yes)$') {
+            try {
+                Get-ChildItem -LiteralPath $path -Force `
+                    -ErrorAction SilentlyContinue |
+                    Remove-Item -Recurse -Force -ErrorAction Stop
+                Write-Ok "$label cleared."
+            } catch {
+                Write-Warn "could not fully clear $label : $($_.Exception.Message)"
+            }
+        }
+    }
+
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor DarkGray
+    Write-Host "  Optional cleanup -- answer y to wipe, anything else keeps."  -ForegroundColor White
+    Write-Host "============================================================" -ForegroundColor DarkGray
+
+    Confirm-Cleanup "conversations"     (Join-Path $root "chat_history")
+    Confirm-Cleanup "uploaded documents"(Join-Path $root "data\uploads")
+    Confirm-Cleanup "vector index + summary cache" `
+                                        (Join-Path $root "chroma_db")
+
+    Write-Host ""
+    Write-Ok "goodbye."
+    # Pause briefly so the user can read the final messages when launched
+    # from a double-click (the window auto-closes otherwise).
+    Start-Sleep -Seconds 1
+}
