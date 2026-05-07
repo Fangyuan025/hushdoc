@@ -198,6 +198,40 @@ class LocalVectorStore:
             return {"$and": [filter, scope]}
         return filter or scope
 
+    # Errors that often clear themselves on a retry: SQLite file-locks
+    # from concurrent writers, transient HNSW reads during a write, etc.
+    # Matched by substring on the exception's str() so we don't have to
+    # import every chromadb internal exception class.
+    _TRANSIENT_HINTS = ("lock", "busy", "i/o disk", "temporarily unavailable")
+
+    def _search_with_retry(self, op_name: str, fn):
+        """Run a chroma similarity call, retry once on transient errors,
+        and surface the underlying exception's message in the wrapper so
+        the SSE error event tells the user what actually went wrong."""
+        try:
+            return fn()
+        except Exception as exc:
+            msg = str(exc).lower()
+            transient = any(h in msg for h in self._TRANSIENT_HINTS)
+            if transient:
+                logger.warning(
+                    "%s hit a transient error (%s); retrying once...",
+                    op_name, exc.__class__.__name__,
+                )
+                try:
+                    return fn()
+                except Exception as exc2:
+                    logger.exception("%s failed on retry too.", op_name)
+                    raise RuntimeError(
+                        f"Vector search failed: {exc2.__class__.__name__}: {exc2}. "
+                        "If this keeps happening, restart the app to clear any stale "
+                        "ChromaDB locks."
+                    ) from exc2
+            logger.exception("%s failed: %s", op_name, query if 'query' in locals() else "")
+            raise RuntimeError(
+                f"Vector search failed: {exc.__class__.__name__}: {exc}"
+            ) from exc
+
     def similarity_search(
         self,
         query: str,
@@ -208,11 +242,10 @@ class LocalVectorStore:
         """Top-k similarity search, optionally restricted to a subset of
         indexed filenames (multi-document cross-talk control)."""
         where = self._build_filter(filter, filenames)
-        try:
-            return self._store.similarity_search(query, k=k, filter=where)
-        except Exception as exc:
-            logger.exception("Similarity search failed for query: %s", query)
-            raise RuntimeError("Vector search failed.") from exc
+        return self._search_with_retry(
+            "Similarity search",
+            lambda: self._store.similarity_search(query, k=k, filter=where),
+        )
 
     def similarity_search_with_scores(
         self,
@@ -222,11 +255,10 @@ class LocalVectorStore:
         filenames: Optional[Sequence[str]] = None,
     ) -> List[tuple[Document, float]]:
         where = self._build_filter(filter, filenames)
-        try:
-            return self._store.similarity_search_with_score(query, k=k, filter=where)
-        except Exception as exc:
-            logger.exception("Scored similarity search failed.")
-            raise RuntimeError("Vector search failed.") from exc
+        return self._search_with_retry(
+            "Scored similarity search",
+            lambda: self._store.similarity_search_with_score(query, k=k, filter=where),
+        )
 
     def as_retriever(self, k: int = 4, **kwargs) -> BaseRetriever:
         """Return a LangChain BaseRetriever for use in chains."""
