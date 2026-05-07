@@ -139,6 +139,27 @@ export function useChat({
   // the in-flight optimistic send.
   const settledConvIdRef = useRef<string | null>(null)
   useEffect(() => {
+    // Already settled — typical on re-renders where skipHydrationFor
+    // flipped back to null after the auto-create handshake. Bail out
+    // BEFORE touching abortRef / streaming state, otherwise we'd
+    // cancel the in-flight optimistic fetch that send() just started.
+    if (conversationId && settledConvIdRef.current === conversationId) {
+      return
+    }
+    // Auto-create-on-send: parent just minted this conv ID and send()
+    // is already streaming the optimistic user/assistant pair into it.
+    // Don't abort, don't reset streaming, don't wipe messages — just
+    // mark settled and let the in-flight fetch run to completion.
+    if (
+      conversationId &&
+      skipHydrationFor &&
+      skipHydrationFor === conversationId
+    ) {
+      settledConvIdRef.current = conversationId
+      onHydrationConsumed?.()
+      return
+    }
+    // From here down: genuine switch or initial mount with persisted id.
     let cancelled = false
     abortRef.current?.abort()
     abortRef.current = null
@@ -149,20 +170,8 @@ export function useChat({
       settledConvIdRef.current = null
       return
     }
-    if (settledConvIdRef.current === conversationId) {
-      // Already loaded (or explicitly skipped) for this id this session.
-      return
-    }
     setError(null)
     setStreaming(false)
-    // Auto-create-on-send path: the parent already knows this conv was
-    // just minted empty AND we're about to start streaming optimistic
-    // messages into it, so a hydration fetch would just clobber them.
-    if (skipHydrationFor && skipHydrationFor === conversationId) {
-      settledConvIdRef.current = conversationId
-      onHydrationConsumed?.()
-      return
-    }
     settledConvIdRef.current = conversationId
     conversationApi
       .get(conversationId)
