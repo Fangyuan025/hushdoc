@@ -21,7 +21,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     {
       disabled,
       streaming,
-      placeholder = "Ask anything about your PDFs…",
+      placeholder = "Ask anything about your documents…",
       onSend,
       onStop,
       leftSlot,

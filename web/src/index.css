@@ -121,19 +121,6 @@
   }
 }
 
-/* Subtle blinking cursor for streaming text. */
-@keyframes hushdoc-cursor {
-  0%, 60% { opacity: 1; }
-  61%, 100% { opacity: 0; }
-}
-.streaming-cursor::after {
-  content: "▍";
-  display: inline-block;
-  margin-left: 1px;
-  color: var(--muted-foreground);
-  animation: hushdoc-cursor 1s steps(1) infinite;
-}
-
 /* Pulsing ring for the mic button while recording. */
 @keyframes hushdoc-mic-pulse {
   0%   { opacity: 0.6; }

@@ -153,7 +153,7 @@ function Shell() {
           <span className="text-xl">🤫</span>
           <h1 className="text-base font-semibold tracking-tight">Hushdoc</h1>
           <span className="hidden truncate text-xs text-muted-foreground sm:inline">
-            local-only PDF assistant
+            local-only document assistant
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">

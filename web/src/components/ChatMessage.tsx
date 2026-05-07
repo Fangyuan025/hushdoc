@@ -1,11 +1,19 @@
 import { User, Sparkles, Volume2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
+import rehypeKatex from "rehype-katex"
 
 import { cn } from "@/lib/utils"
 import type { ChatMessage as Msg } from "@/types"
 
 import { Sources } from "./Sources"
+
+// Inserting the cursor character into the streaming content directly
+// (rather than via a CSS ::after on the prose container) puts it inline
+// at the actual last text position — even mid-paragraph, mid-list, or
+// mid-code-block — which is what the user expects from a typewriter.
+const STREAMING_CURSOR = "▍"
 
 interface ChatMessageProps {
   msg: Msg
@@ -37,15 +45,15 @@ export function ChatMessage({ msg, onReplay }: ChatMessageProps) {
           {isUser ? (
             <div className="whitespace-pre-wrap break-words">{msg.content}</div>
           ) : (
-            <div
-              className={cn(
-                "prose prose-sm dark:prose-invert max-w-none [&_p]:my-1.5 [&_pre]:my-2",
-                msg.streaming && "streaming-cursor",
-              )}
-            >
+            <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1.5 [&_pre]:my-2 [&_.katex-display]:my-2">
               {msg.content ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {msg.content}
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
+                >
+                  {msg.streaming
+                    ? msg.content + STREAMING_CURSOR
+                    : msg.content}
                 </ReactMarkdown>
               ) : msg.streaming ? (
                 <span className="text-muted-foreground">…</span>

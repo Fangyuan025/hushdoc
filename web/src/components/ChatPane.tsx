@@ -4,7 +4,7 @@ import {
   useImperativeHandle,
   useRef,
 } from "react"
-import { ArrowDown, Sparkles } from "lucide-react"
+import { ArrowDown, Pause, Sparkles, Volume2, X } from "lucide-react"
 
 import { MicButton } from "@/components/MicButton"
 import { Button } from "@/components/ui/button"
@@ -64,11 +64,21 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
     useImperativeHandle(
       ref,
       () => ({
-        clear,
+        clear: () => {
+          // Hard-stop everything in flight so a "New chat" click feels
+          // truly fresh: kill any ongoing TTS playback, abort streaming,
+          // cancel a recording-in-progress, then wipe the messages.
+          voice.stopPlayback()
+          if (voice.state !== "idle") voice.cancel()
+          if (streaming) stop()
+          void clear()
+        },
         focusInput: () => inputRef.current?.focus(),
         cancel: () => {
+          // ESC priority: recording > streaming > playback.
           if (voice.state !== "idle") voice.cancel()
           else if (streaming) stop()
+          else if (voice.isPlaying) voice.stopPlayback()
         },
       }),
       [clear, voice, streaming, stop],
@@ -117,6 +127,38 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
           </div>
         )}
 
+        {/* Playback-control pill, only while TTS is playing. Lives just
+            above the chat input so it doesn't collide with the answer
+            text or the "Jump to latest" pill. */}
+        {voice.isPlaying && (
+          <div className="mx-auto -mb-1 flex max-w-3xl items-center justify-center gap-2 px-4 pt-2">
+            <div className="flex items-center gap-1 rounded-full border bg-card px-2 py-1 text-xs shadow-sm">
+              <Volume2 className="h-3 w-3 text-emerald-500" />
+              <span className="text-muted-foreground">Reading aloud…</span>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                className="h-6 w-6"
+                onClick={voice.togglePause}
+                title="Pause / resume"
+              >
+                <Pause className="h-3 w-3" />
+              </Button>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                className="h-6 w-6"
+                onClick={voice.stopPlayback}
+                title="Stop"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+        )}
+
         <ChatInput
           ref={inputRef}
           streaming={streaming}
@@ -146,7 +188,7 @@ function EmptyState() {
         <Sparkles className="h-6 w-6" />
       </div>
       <h2 className="text-xl font-semibold tracking-tight">
-        Ask anything about your PDFs.
+        Ask anything about your documents.
       </h2>
       <p className="max-w-md text-sm text-muted-foreground">
         Upload a PDF, DOCX, or document photo from the sidebar, then start

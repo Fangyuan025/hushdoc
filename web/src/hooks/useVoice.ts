@@ -92,12 +92,32 @@ export function useVoice() {
 
   // Hidden audio element used for autoplay. Created once, reused.
   const playerRef = useRef<HTMLAudioElement | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
   if (typeof document !== "undefined" && !playerRef.current) {
     const el = document.createElement("audio")
     el.style.display = "none"
     document.body.appendChild(el)
     playerRef.current = el
   }
+  // Wire <audio> events to React state so the UI can show pause/play.
+  useEffect(() => {
+    const el = playerRef.current
+    if (!el) return
+    const onPlay = () => setIsPlaying(true)
+    const onPauseOrEnd = () => setIsPlaying(false)
+    el.addEventListener("play", onPlay)
+    el.addEventListener("playing", onPlay)
+    el.addEventListener("pause", onPauseOrEnd)
+    el.addEventListener("ended", onPauseOrEnd)
+    el.addEventListener("emptied", onPauseOrEnd)
+    return () => {
+      el.removeEventListener("play", onPlay)
+      el.removeEventListener("playing", onPlay)
+      el.removeEventListener("pause", onPauseOrEnd)
+      el.removeEventListener("ended", onPauseOrEnd)
+      el.removeEventListener("emptied", onPauseOrEnd)
+    }
+  }, [])
 
   const playUrl = useCallback((url: string) => {
     const el = playerRef.current
@@ -105,6 +125,25 @@ export function useVoice() {
     el.src = url
     el.currentTime = 0
     void el.play().catch(() => undefined)
+  }, [])
+
+  /** Stop playback and clear the source. Used when the user starts a new
+   *  chat or hits the global cancel hotkey. */
+  const stopPlayback = useCallback(() => {
+    const el = playerRef.current
+    if (!el) return
+    el.pause()
+    el.removeAttribute("src")
+    el.currentTime = 0
+    el.load()  // forces "emptied" event so isPlaying flips to false
+  }, [])
+
+  /** Toggle pause/resume on the current audio. No-op if nothing is loaded. */
+  const togglePause = useCallback(() => {
+    const el = playerRef.current
+    if (!el || !el.src) return
+    if (el.paused) void el.play().catch(() => undefined)
+    else el.pause()
   }, [])
 
   const synthesizeAndPlay = useCallback(
@@ -127,6 +166,9 @@ export function useVoice() {
 
   return {
     enabled,
+    isPlaying,
+    stopPlayback,
+    togglePause,
     setEnabled,
     state,
     level,
