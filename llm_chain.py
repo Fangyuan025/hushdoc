@@ -254,32 +254,50 @@ def language_directive(lang: str) -> str:
 #   META    — ambiguous on their own ('why?', 'really?', 'how?'). These are
 #             chitchat ONLY when there's no chat history; with history they
 #             are follow-ups that need retrieval-with-rewrite.
+# Trailing punctuation a real user would type after a greeting / meta-q.
+# Used as the end-of-message anchor for "must be the whole message" patterns.
+_END = r"[\s!?。.！？～~]*$"
+
 _CHITCHAT_STRICT_PATTERNS = [
-    # English greetings (with or without "good"). Trailing punctuation OK.
+    # ---- Greetings (prefix-match OK; a long real question rarely starts
+    #      with these and the >40-char guard below catches "Hi there, can
+    #      you summarize this paper?"-shaped messages anyway) ----
     r"^\s*(hi|hello|hey|yo|sup|hiya|howdy)\b",
     r"^\s*(good\s+)?(morning|afternoon|evening|night|day)\b",
     r"^\s*mornin'?\b",
-    # English thanks / farewells
     r"^\s*(thanks|thank\s+you|thx|ty|cheers|bye|goodbye|see\s+you|nice\s+to\s+meet)\b",
     r"^\s*(how\s+are\s+you|how's\s+it\s+going|what'?s?\s+up|how\s+do\s+you\s+do)\b",
-    # English identity / capability questions
-    r"^\s*(who\s+are\s+you|what\s+(are\s+you|can\s+you\s+do|do\s+you\s+do)|what\s+is\s+this)\b",
-    r"^\s*(introduce\s+yourself|tell\s+me\s+about\s+yourself|please\s+introduce)\b",
-    r"^\s*(help|what\s+(should|can)\s+i\s+(do|ask)|how\s+do\s+i\s+use\s+(this|you))\b",
-    # Chinese greetings - 你好/您好/嗨/哈喽/哈罗
-    r"^\s*(你好|您好|嗨+|哈[喽啰罗囉])[\s!?。.！？～~]*$",
-    # Chinese morning greetings: 早 / 早安 / 早上好 / 早晨好 / 早呀 / 早啊
+
+    # ---- English meta-questions about Hushdoc itself.
+    #      MUST be (essentially) the whole message — without the end anchor,
+    #      "what is this" would swallow "What is this paper about?" and
+    #      "help" would swallow "Help me find the budget number." ----
+    r"^\s*who\s+are\s+you" + _END,
+    r"^\s*what\s+(are\s+you|can\s+you\s+do|do\s+you\s+do)" + _END,
+    r"^\s*what\s+is\s+this(\s+(app|tool|thing|hushdoc))?" + _END,
+    r"^\s*(introduce\s+yourself|tell\s+me\s+about\s+yourself|please\s+introduce(\s+yourself)?)" + _END,
+    r"^\s*help" + _END,
+    r"^\s*what\s+(should|can)\s+i\s+(do|ask)" + _END,
+    r"^\s*how\s+do\s+i\s+use\s+(this|you)" + _END,
+
+    # ---- Chinese greetings — 你好 / 您好 / 嗨 / 哈喽 / 哈罗 ----
+    r"^\s*(你好|您好|嗨+|哈[喽啰罗囉])" + _END,
+    # 早 / 早安 / 早上好 / 早晨好 / 早呀 / 早啊
     r"^\s*早(上|晨)?(好|安)?[\s!?。.！？呀啊嘛哦呢～~]*$",
-    # Chinese midday/afternoon/evening greetings
     r"^\s*(午安|中午好|下午好)[\s!?。.！？呀啊～~]*$",
     r"^\s*晚(上)?(好|安)?[\s!?。.！？呀啊～~]*$",
-    # Chinese thanks / farewells / casual
-    r"^\s*(谢谢|多谢|感谢|拜拜|再见|回头见|辛苦了|加油)\b",
-    r"^\s*(在吗|你在吗|忙吗|最近怎么样|怎么样啊?)\b",
-    # Chinese identity / capability questions
-    r"^\s*(你是谁|你叫什么|你能(做|干)什么|你是什么|介绍(一?下)?(你?自己|你))",
-    r"^\s*(你会(做)?什么|你能帮(我|忙)|帮助|怎么(用|玩))",
-    r"(请|麻烦)?介绍(一?下)?(你?自己|你)",
+    # Chinese thanks / farewells / casual — short, end-anchored
+    r"^\s*(谢谢|多谢|感谢|拜拜|再见|回头见|辛苦了|加油)" + _END,
+    r"^\s*(在吗|你在吗|忙吗|最近怎么样|怎么样啊?)" + _END,
+
+    # ---- Chinese meta-questions about Hushdoc — also end-anchored so
+    #      "你是谁写的?" / "介绍一下这篇文章" don't get classified as chitchat.
+    r"^\s*(你是谁|你叫什么|你能(做|干)什么|你是什么)" + _END,
+    r"^\s*介绍(一?下)?(你?自己)" + _END,
+    r"^\s*(你会(做)?什么|你能帮(我|忙)什么)" + _END,
+    r"^\s*(帮助|怎么(用|玩))" + _END,
+    # "请介绍一下你自己" / "麻烦介绍下自己"
+    r"^\s*(请|麻烦)介绍(一?下)?(你?自己)" + _END,
 ]
 _CHITCHAT_STRICT_RE = re.compile("|".join(_CHITCHAT_STRICT_PATTERNS), re.IGNORECASE)
 
