@@ -116,33 +116,54 @@ function Shell() {
     })
   }, [])
 
-  // Heartbeat: pings the backend so the launcher's auto-shutdown
-  // watchdog can tell when the browser has actually gone away.
+  // Heartbeat: tells the launcher's watchdog whether the browser is
+  // still around. Two channels:
   //
-  // Pings unconditionally — even when the tab is hidden. Modern
-  // browsers throttle background-tab `setInterval` to ~once a minute,
-  // so the backend's HUSHDOC_HEARTBEAT_TIMEOUT (default 60 s, see
-  // server/main.py) is sized to tolerate that throttle with headroom.
-  // An earlier version skipped pings when `visibilityState === 'hidden'`
-  // and that combined with the old 15 s timeout caused false shutdowns
-  // when the user clicked to another window for ~20 s.
+  //   - Regular ping (every 10 s, plus an eager one on visibility
+  //     change to *visible*). Pings unconditionally even when the tab
+  //     is hidden — browsers throttle background `setInterval` to
+  //     ~1/min and the backend's idle window (60 s) is sized for that.
   //
-  // `visibilitychange` to *visible* fires an immediate ping so a tab
-  // returning from a long throttle resets the timer right away, well
-  // before the next scheduled tick.
+  //   - Goodbye beacon on `pagehide`. `navigator.sendBeacon` survives
+  //     the page being unloaded; regular `fetch` is killed mid-flight.
+  //     This switches the backend to a 5 s goodbye window so the
+  //     launcher's cleanup prompt appears almost instantly when the
+  //     user actually closes the tab — without sacrificing the long
+  //     idle window that protects backgrounded tabs from false exit.
+  //     A page reload also fires pagehide, but the freshly-mounted
+  //     page sends a regular ping within a second which cancels the
+  //     goodbye state on the backend before it expires.
   useEffect(() => {
     const ping = () => {
       void fetch("/api/heartbeat", { method: "POST" }).catch(() => {})
     }
     ping()
     const id = window.setInterval(ping, 10_000)
+
     const onShow = () => {
       if (document.visibilityState === "visible") ping()
     }
+    const onHide = () => {
+      // sendBeacon: queued by the browser, survives page unload.
+      // Falls through to keepalive fetch if sendBeacon is missing.
+      try {
+        if (!navigator.sendBeacon?.("/api/heartbeat?closing=1")) {
+          void fetch("/api/heartbeat?closing=1", {
+            method: "POST",
+            keepalive: true,
+          }).catch(() => {})
+        }
+      } catch {
+        /* best-effort; the 60 s idle window is the safety net */
+      }
+    }
+
     document.addEventListener("visibilitychange", onShow)
+    window.addEventListener("pagehide", onHide)
     return () => {
       window.clearInterval(id)
       document.removeEventListener("visibilitychange", onShow)
+      window.removeEventListener("pagehide", onHide)
     }
   }, [])
 

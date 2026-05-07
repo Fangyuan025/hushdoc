@@ -424,45 +424,73 @@ async def voice_synthesize(req: VoiceSynthesizeRequest):
 
 
 # ---------------------------------------------------------------------------
-# Heartbeat watchdog
+# Heartbeat watchdog (two-mode)
 #
-# The frontend POSTs /api/heartbeat every ~10s while the tab is open. If
-# the server stops hearing pings for HEARTBEAT_TIMEOUT_S seconds AFTER it
-# has received at least one (i.e. the user actually opened the app at
-# least once this run), the process self-exits. The launcher
-# (hushdoc.bat) sees the backend exit and falls into its cleanup-prompt
-# flow.
+# Mode A — IDLE (default): the frontend POSTs /api/heartbeat every ~10s
+#     while the tab is alive. After HEARTBEAT_TIMEOUT_S of silence we
+#     self-exit. The 60s default is sized to tolerate Chrome / Edge
+#     throttling background-tab setInterval to once a minute, so a tab
+#     the user has clicked away from won't fire a false shutdown.
 #
-# The 60 s default is sized to tolerate Chrome / Edge throttling
-# background-tab setInterval to once a minute. The previous 15 s
-# default caused false shutdowns when the user clicked away to another
-# window for ~20 s — backgrounded tabs simply could not ping fast
-# enough to keep up.
+# Mode B — GOODBYE: when the page is actually being unloaded (close,
+#     navigate-away, real reload) the frontend hits the same endpoint
+#     with ?closing=1 via navigator.sendBeacon -- this fires reliably
+#     during pagehide, where regular fetch is killed. We then switch to
+#     a much shorter GOODBYE_TIMEOUT_S window. If a normal ping arrives
+#     before that expires (e.g. an F5 reload completes and pings resume),
+#     we cancel the goodbye and stay in IDLE mode -- no false shutdown
+#     on reload. Otherwise the launcher's cleanup prompt appears within
+#     ~5s of the user closing the tab, instead of 60s.
 #
-# Disabled by default if HUSHDOC_AUTO_SHUTDOWN=0, so plain dev.sh /
+# HUSHDOC_AUTO_SHUTDOWN=0 disables the watchdog so plain dev.sh /
 # uvicorn workflows aren't ambushed by it.
 # ---------------------------------------------------------------------------
 HEARTBEAT_TIMEOUT_S = float(os.environ.get("HUSHDOC_HEARTBEAT_TIMEOUT", "60"))
+GOODBYE_TIMEOUT_S = float(os.environ.get("HUSHDOC_GOODBYE_TIMEOUT", "5"))
 _AUTO_SHUTDOWN_ENABLED = os.environ.get("HUSHDOC_AUTO_SHUTDOWN", "1") != "0"
-_heartbeat_state = {"last_ts": 0.0, "ever_received": False}
+_heartbeat_state = {
+    "last_ts": 0.0,        # last regular ping
+    "ever_received": False,
+    "goodbye_ts": None,    # set by ?closing=1; cleared by next regular ping
+}
 
 
 @app.post("/api/heartbeat")
-def heartbeat() -> dict:
-    """Frontend ping. Resets the auto-shutdown timer."""
-    _heartbeat_state["last_ts"] = time.time()
+def heartbeat(closing: bool = False) -> dict:
+    """Frontend ping. ``?closing=1`` switches to the short goodbye window;
+    a regular ping (no query) cancels any pending goodbye (so a reload's
+    pagehide -> page-mount -> ping sequence does not exit the server)."""
     _heartbeat_state["ever_received"] = True
+    if closing:
+        _heartbeat_state["goodbye_ts"] = time.time()
+    else:
+        _heartbeat_state["last_ts"] = time.time()
+        _heartbeat_state["goodbye_ts"] = None
     return {"ok": True}
 
 
 async def _heartbeat_watchdog() -> None:
-    """Background loop: once the first heartbeat has arrived, exit if the
-    stream goes silent for too long. Sleeps 3s between checks so detection
-    latency is bounded by HEARTBEAT_TIMEOUT_S + 3s."""
+    """Background loop: once the first heartbeat has arrived, exit either
+    when the goodbye window expires or when the idle window expires.
+    Sleeps 1.5s so goodbye detection latency stays sub-second past the
+    GOODBYE_TIMEOUT_S threshold."""
     while True:
-        await asyncio.sleep(3)
+        await asyncio.sleep(1.5)
         if not _heartbeat_state["ever_received"]:
             continue
+
+        goodbye_at = _heartbeat_state["goodbye_ts"]
+        if goodbye_at is not None:
+            elapsed = time.time() - goodbye_at
+            if elapsed > GOODBYE_TIMEOUT_S:
+                logger.info(
+                    "Client said goodbye %.1fs ago and did not return — auto-shutdown.",
+                    elapsed,
+                )
+                threading.Timer(0.3, lambda: os._exit(0)).start()
+                return
+            continue
+
         elapsed = time.time() - _heartbeat_state["last_ts"]
         if elapsed > HEARTBEAT_TIMEOUT_S:
             logger.info(
