@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react"
 import { Loader2, User, Sparkles, Volume2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -16,27 +15,15 @@ import { Sources } from "./Sources"
 // mid-code-block — which is what the user expects from a typewriter.
 const STREAMING_CURSOR = "▍"
 
-/**
- * Loading indicator shown in the assistant bubble while it's streaming
- * but no tokens have arrived yet. After 5s of silence, switches to a
- * "warming up the model" hint — covers cold-start where llama-server
- * is being spawned and the embedding model is being loaded for the
- * first time, which can take 30-60s on a fresh boot.
- */
+/** Loading indicator shown in the assistant bubble while it's streaming
+ *  but no tokens have arrived yet. Cold-start latency is masked by the
+ *  warmup ping in App.tsx, so a single neutral status line is all the
+ *  user needs here. */
 function StreamingPlaceholder() {
-  const [showColdStartHint, setShowColdStartHint] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setShowColdStartHint(true), 5_000)
-    return () => clearTimeout(t)
-  }, [])
   return (
     <div className="flex items-center gap-2 text-muted-foreground">
       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      <span className="text-sm">
-        {showColdStartHint
-          ? "Warming up the model — first run takes ~30 s on cold boot."
-          : "Generating response…"}
-      </span>
+      <span className="text-sm">Generating…</span>
     </div>
   )
 }

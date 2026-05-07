@@ -426,16 +426,23 @@ async def voice_synthesize(req: VoiceSynthesizeRequest):
 # ---------------------------------------------------------------------------
 # Heartbeat watchdog
 #
-# The frontend POSTs /api/heartbeat every few seconds while the tab is open.
-# If the server stops hearing pings for HEARTBEAT_TIMEOUT_S seconds AFTER it
-# has received at least one (i.e. the user actually opened the app at least
-# once this run), the process self-exits. The launcher (hushdoc.bat) sees
-# the backend exit and falls into its cleanup-prompt flow.
+# The frontend POSTs /api/heartbeat every ~10s while the tab is open. If
+# the server stops hearing pings for HEARTBEAT_TIMEOUT_S seconds AFTER it
+# has received at least one (i.e. the user actually opened the app at
+# least once this run), the process self-exits. The launcher
+# (hushdoc.bat) sees the backend exit and falls into its cleanup-prompt
+# flow.
 #
-# Disabled by default if HUSHDOC_AUTO_SHUTDOWN=0, so plain `dev.sh` /
-# `uvicorn` workflows aren't ambushed by it.
+# The 60 s default is sized to tolerate Chrome / Edge throttling
+# background-tab setInterval to once a minute. The previous 15 s
+# default caused false shutdowns when the user clicked away to another
+# window for ~20 s — backgrounded tabs simply could not ping fast
+# enough to keep up.
+#
+# Disabled by default if HUSHDOC_AUTO_SHUTDOWN=0, so plain dev.sh /
+# uvicorn workflows aren't ambushed by it.
 # ---------------------------------------------------------------------------
-HEARTBEAT_TIMEOUT_S = float(os.environ.get("HUSHDOC_HEARTBEAT_TIMEOUT", "15"))
+HEARTBEAT_TIMEOUT_S = float(os.environ.get("HUSHDOC_HEARTBEAT_TIMEOUT", "60"))
 _AUTO_SHUTDOWN_ENABLED = os.environ.get("HUSHDOC_AUTO_SHUTDOWN", "1") != "0"
 _heartbeat_state = {"last_ts": 0.0, "ever_received": False}
 

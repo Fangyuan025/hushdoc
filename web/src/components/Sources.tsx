@@ -57,7 +57,7 @@ export function Sources({
       <Accordion type="single" collapsible className="border-none">
         <AccordionItem value="sources" className="border-none">
           <AccordionTrigger className="py-1 text-[11px] uppercase tracking-wide text-muted-foreground/80 hover:no-underline">
-            Sources & retrieval debug
+            Sources
           </AccordionTrigger>
           <AccordionContent className="pb-2 pt-1">
             <div className="space-y-3 rounded-md border border-border/60 bg-muted/30 p-3 text-xs">

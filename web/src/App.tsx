@@ -116,23 +116,29 @@ function Shell() {
     })
   }, [])
 
-  // Heartbeat: pings the backend every 5 s while the tab is open. The
-  // launcher's auto-shutdown watchdog uses this to detect that the user
-  // has closed the browser — when heartbeats stop for ~15 s the backend
-  // self-exits, the launcher's wait loop unblocks, and its cleanup
-  // prompt fires. A `sendBeacon` on `pagehide` covers the close-tab
-  // case so the watchdog notices within the first 5 s of silence.
+  // Heartbeat: pings the backend so the launcher's auto-shutdown
+  // watchdog can tell when the browser has actually gone away.
+  //
+  // Pings unconditionally — even when the tab is hidden. Modern
+  // browsers throttle background-tab `setInterval` to ~once a minute,
+  // so the backend's HUSHDOC_HEARTBEAT_TIMEOUT (default 60 s, see
+  // server/main.py) is sized to tolerate that throttle with headroom.
+  // An earlier version skipped pings when `visibilityState === 'hidden'`
+  // and that combined with the old 15 s timeout caused false shutdowns
+  // when the user clicked to another window for ~20 s.
+  //
+  // `visibilitychange` to *visible* fires an immediate ping so a tab
+  // returning from a long throttle resets the timer right away, well
+  // before the next scheduled tick.
   useEffect(() => {
     const ping = () => {
-      // Only ping when the document is visible — backgrounded tabs
-      // throttle setInterval anyway, and the watchdog grace window of
-      // 15 s tolerates short visibility gaps.
-      if (document.visibilityState === "hidden") return
       void fetch("/api/heartbeat", { method: "POST" }).catch(() => {})
     }
     ping()
-    const id = window.setInterval(ping, 5_000)
-    const onShow = () => ping()
+    const id = window.setInterval(ping, 10_000)
+    const onShow = () => {
+      if (document.visibilityState === "visible") ping()
+    }
     document.addEventListener("visibilitychange", onShow)
     return () => {
       window.clearInterval(id)
