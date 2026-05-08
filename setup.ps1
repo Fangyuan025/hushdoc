@@ -31,9 +31,10 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $root
 
-# Speeds up Invoke-WebRequest by ~100x for large files. PowerShell 5.1's
-# default progress UI is surprisingly expensive to render and dominates
-# wall-clock time on multi-hundred-MB downloads.
+# PowerShell 5.1's progress UI is so expensive to render that it dominates
+# wall-clock time on multi-hundred-MB downloads via Invoke-WebRequest --
+# observed to slow a 1 GB download by ~100x. Suppress it globally; we use
+# curl.exe instead (see Get-FileWithProgress below) for visible progress.
 $ProgressPreference = "SilentlyContinue"
 
 function Write-Step($msg)  { Write-Host "[setup] $msg" -ForegroundColor Cyan }
@@ -49,6 +50,52 @@ function Need-Tool($name, $hint) {
         Write-Host ""
         Read-Host "Press Enter to close"
         exit 1
+    }
+}
+
+# Download a URL to a file with VISIBLE progress, hard timeout, and clear
+# error reporting. Tries curl.exe first (Windows 10 1803+ ships it under
+# C:\Windows\System32; gives a one-line progress bar with speed + ETA at
+# basically zero rendering cost) and falls back to Invoke-WebRequest if
+# curl is somehow missing. The fallback is silent on progress but still
+# downloads at full speed thanks to ProgressPreference above.
+#
+# Hard timeout defaults to 30 min so a stalled connection can't lock the
+# user's terminal forever. Stalled downloads also abort if the transfer
+# rate stays under 1 KB/s for 60 s (curl's --speed-limit / --speed-time).
+function Get-FileWithProgress {
+    param(
+        [Parameter(Mandatory)] [string]$Url,
+        [Parameter(Mandatory)] [string]$OutFile,
+        [int]$TimeoutSec = 1800,
+        [string]$Label = ""
+    )
+    $shown = if ($Label) { $Label } else { Split-Path $OutFile -Leaf }
+    Write-Step "Downloading $shown ..."
+    Write-Host  "         (Ctrl+C to cancel; if stuck for >60 s the download self-aborts.)" -ForegroundColor DarkGray
+
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        $args = @(
+            "-L",                                # follow redirects (HF -> CDN)
+            "--fail",                            # exit non-zero on 4xx/5xx
+            "--progress-bar",
+            "--max-time", $TimeoutSec,           # hard wall clock
+            "--speed-limit", "1024",             # bytes/sec ...
+            "--speed-time",  "60",               # ... sustained for 60 s
+            "--retry",       "3",
+            "--retry-delay", "2",
+            "--output", $OutFile,
+            $Url
+        )
+        & $curl.Source @args
+        if ($LASTEXITCODE -ne 0) {
+            if (Test-Path $OutFile) { Remove-Item -Force $OutFile -ErrorAction SilentlyContinue }
+            throw "curl exited with code $LASTEXITCODE downloading $Url"
+        }
+    } else {
+        Write-Warn "curl.exe not found, falling back to Invoke-WebRequest (no progress bar)."
+        Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec $TimeoutSec
     }
 }
 
@@ -206,8 +253,8 @@ if ((Test-Path $serverExe) -and (-not $Force)) {
     function Download-And-Unpack($url, $name, $sizeBytes) {
         $zipPath = Join-Path $runtimeDir $name
         $tmpExtract = Join-Path $runtimeDir "_extract"
-        Write-Step "Downloading $name ($([math]::Round($sizeBytes/1MB,1)) MB) ..."
-        Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+        $sizeMB = [math]::Round($sizeBytes/1MB, 1)
+        Get-FileWithProgress -Url $url -OutFile $zipPath -Label "$name ($sizeMB MB)"
         Write-Step "Extracting $name ..."
         if (Test-Path $tmpExtract) { Remove-Item -Recurse -Force $tmpExtract }
         Expand-Archive -Path $zipPath -DestinationPath $tmpExtract -Force
@@ -258,11 +305,10 @@ if ((Test-Path $modelPath) -and (-not $Force)) {
     $sizeMB = [math]::Round(((Get-Item $modelPath).Length / 1MB), 1)
     Write-Skip "models\model.gguf already exists ($sizeMB MB) -- skipping download."
 } else {
-    Write-Step "Downloading default model: Qwen3-1.7B Q4_K_M (~1 GB)..."
     Write-Host "         Source: $modelUrl" -ForegroundColor DarkGray
-    Write-Host "         This is the slow step. Get a coffee."             -ForegroundColor DarkGray
+    Write-Host "         This is the slow step (~1.2 GB). Expect a few minutes on broadband." -ForegroundColor DarkGray
     try {
-        Invoke-WebRequest -Uri $modelUrl -OutFile $modelPath -UseBasicParsing
+        Get-FileWithProgress -Url $modelUrl -OutFile $modelPath -Label "Qwen3-1.7B Q4_K_M (~1.2 GB)"
     } catch {
         if (Test-Path $modelPath) { Remove-Item -Force $modelPath }
         Write-Fail "Model download failed: $($_.Exception.Message)"
