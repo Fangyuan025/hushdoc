@@ -1,6 +1,9 @@
 # 🤫 Hushdoc
 
 **English** · [中文](README.zh-CN.md)
+&nbsp;&nbsp;|&nbsp;&nbsp;
+[Releases](https://github.com/Fangyuan025/hushdoc/releases) ·
+[Changelog](CHANGELOG.md)
 
 > **Chat with your documents — privately, offline, on your own machine.**
 
@@ -115,7 +118,14 @@ You need:
 - An NVIDIA GPU is **optional** — speeds up large models, but the
   default Qwen3-1.7B runs comfortably on CPU.
 
-### The easy way: two double-clicks
+### Get a stable build
+
+For a tested snapshot, download the source archive from the latest
+[release](https://github.com/Fangyuan025/hushdoc/releases) (zip or
+tar.gz), extract, and continue with `setup.bat` / `setup.sh` below.
+For bleeding-edge features clone `master` instead.
+
+### The easy way: two double-clicks (Windows)
 
 ```powershell
 .\setup.bat        # one-time: installs deps + downloads runtime + model
@@ -146,6 +156,23 @@ safely after `git pull`.
 >   isn't on PATH.
 > - `.\setup.bat -Force` re-downloads the runtime and model (e.g. after
 >   a llama.cpp upgrade). Does **not** recreate the venv.
+
+### macOS / Linux
+
+```bash
+chmod +x setup.sh dev.sh
+./setup.sh         # one-time
+./dev.sh           # every time after
+```
+
+`setup.sh` mirrors `setup.bat` end-to-end: venv, npm install,
+auto-detects an NVIDIA GPU on Linux (CUDA build of `llama-server`),
+falls back to CPU on macOS / no-GPU machines, downloads the same
+Qwen3-1.7B model. Same `--cpu` / `--gpu-build` / `--force` overrides.
+
+> Auto-cleanup-on-exit currently lives only in the Windows `hushdoc.bat`
+> flow. `dev.sh` starts the stack but you'll Ctrl+C to stop and clean
+> up by hand.
 
 ### Want a different / larger model?
 
@@ -253,9 +280,11 @@ hushdoc/
 ├── llama_server.py  llama-server.exe lifecycle manager
 ├── doc_summaries.py per-file summary cache
 ├── voice.py         Whisper ASR + Kokoro TTS
-├── setup.bat        one-time installer (deps + runtime + model)
-├── hushdoc.bat      one-click launcher with cleanup prompt
-└── dev.sh / dev.ps1 plain dev launchers (no auto-cleanup)
+├── setup.bat / .sh  one-time installer (deps + runtime + model)
+├── hushdoc.bat      Windows one-click launcher with cleanup prompt
+├── dev.sh / dev.ps1 plain dev launchers (no auto-cleanup)
+├── VERSION          read by /api/health and shown in the UI footer
+└── CHANGELOG.md
                      (gitignored: runtime/  models/*.gguf)
 ```
 
@@ -263,9 +292,9 @@ hushdoc/
 
 ## Notes
 
-- **Linux / macOS users:** swap `hushdoc.bat` for `./dev.sh`. Auto-
-  cleanup currently lives in the `.bat`/`.ps1` flow only — `dev.sh`
-  starts the stack but won't prompt on exit.
+- **Linux / macOS users:** see the *macOS / Linux* section above —
+  `setup.sh` then `dev.sh`. Auto-cleanup currently lives in the
+  `.bat` / `.ps1` flow only.
 - **CPU-only** also works — set `n_gpu_layers=0` in `LLMConfig`. First
   token will take longer; quality is identical.
 - **Air-gapped install:** pre-download the embedding (`all-MiniLM-L6-v2`),

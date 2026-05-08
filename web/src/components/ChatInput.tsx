@@ -1,8 +1,10 @@
 import { forwardRef, useState, type KeyboardEvent } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { ArrowUp, Square } from "lucide-react"
 import TextareaAutosize from "react-textarea-autosize"
 
 import { Button } from "@/components/ui/button"
+import { apiHealth } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface ChatInputProps {
@@ -29,6 +31,15 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     ref,
   ) {
   const [value, setValue] = useState("")
+
+  // Surface the app version under the input. Same query-key as the
+  // HealthPill so TanStack returns the cached response — no duplicate fetch.
+  const { data: health } = useQuery({
+    queryKey: ["health"],
+    queryFn: apiHealth,
+    refetchInterval: 5_000,
+    staleTime: 5_000,
+  })
 
   const submit = () => {
     const t = value.trim()
@@ -86,6 +97,9 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       </div>
       <div className="mx-auto mt-1.5 max-w-3xl text-center text-[10px] text-muted-foreground/70">
         Hushdoc runs entirely on your machine — nothing leaves it.
+        {health?.version && (
+          <span className="ml-2 opacity-60">v{health.version}</span>
+        )}
       </div>
     </div>
   )

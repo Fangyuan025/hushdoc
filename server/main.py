@@ -59,6 +59,21 @@ logging.basicConfig(
 logger = logging.getLogger("server.main")
 
 
+# Repo-root VERSION file is the single source of truth for the build's
+# user-visible version string. Read once at import; missing-or-broken file
+# falls back to "dev" so a git-clone running from source isn't blocked.
+def _read_version() -> str:
+    try:
+        # main.py lives at server/main.py; VERSION is one level up at the repo root.
+        path = Path(__file__).resolve().parent.parent / "VERSION"
+        return path.read_text(encoding="utf-8").strip() or "dev"
+    except Exception:
+        return "dev"
+
+
+APP_VERSION = _read_version()
+
+
 app = FastAPI(
     title="Hushdoc API",
     description=(
@@ -101,6 +116,7 @@ def health() -> HealthResponse:
         count, files = 0, []
     return HealthResponse(
         ok=True,
+        version=APP_VERSION,
         chain_loaded=chain is not None,
         store_loaded=store is not None,
         vector_count=count,

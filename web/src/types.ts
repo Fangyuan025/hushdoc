@@ -9,6 +9,8 @@ export interface SourceDoc {
 
 export interface HealthResponse {
   ok: boolean
+  /** App version (read from /VERSION). 'dev' when no VERSION file is present. */
+  version: string
   chain_loaded: boolean
   store_loaded: boolean
   vector_count: number

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 class HealthResponse(BaseModel):
     ok: bool
+    version: str
     chain_loaded: bool
     store_loaded: bool
     vector_count: int
