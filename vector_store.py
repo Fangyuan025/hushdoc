@@ -169,7 +169,16 @@ class LocalVectorStore:
     def count(self) -> int:
         try:
             return self._store._collection.count()  # noqa: SLF001
-        except Exception:
+        except Exception as exc:
+            # Stale collection reference (another process called reset()).
+            # Refresh once and retry; if that still fails, surface -1 so
+            # /api/health stays cheap and never throws.
+            if any(h in str(exc).lower() for h in self._TRANSIENT_HINTS):
+                self._refresh_store()
+                try:
+                    return self._store._collection.count()  # noqa: SLF001
+                except Exception:
+                    pass
             return -1
 
     def reset(self) -> None:
@@ -198,36 +207,52 @@ class LocalVectorStore:
             return {"$and": [filter, scope]}
         return filter or scope
 
-    # Errors that often clear themselves on a retry: SQLite file-locks
-    # from concurrent writers, transient HNSW reads during a write, etc.
-    # Matched by substring on the exception's str() so we don't have to
-    # import every chromadb internal exception class.
-    _TRANSIENT_HINTS = ("lock", "busy", "i/o disk", "temporarily unavailable")
+    # Substrings of exception messages we know are recoverable. SQLite
+    # file-locks ('lock', 'busy', 'i/o disk') clear themselves on retry;
+    # 'collection ... does not exist' / NotFoundError happens when ANOTHER
+    # process (or another LocalVectorStore in the same process) deleted
+    # the collection out from under us via reset() -- re-opening the
+    # Chroma wrapper picks up the freshly-created replacement.
+    _TRANSIENT_HINTS = (
+        "lock", "busy", "i/o disk", "temporarily unavailable",
+        "does not exist", "not found", "notfounderror", "no such table",
+    )
 
-    def _search_with_retry(self, op_name: str, fn):
-        """Run a chroma similarity call, retry once on transient errors,
-        and surface the underlying exception's message in the wrapper so
-        the SSE error event tells the user what actually went wrong."""
+    def _refresh_store(self) -> None:
+        """Drop the cached Chroma wrapper and reopen against the on-disk
+        chroma_db. Cheap, and lets the next call pick up a collection
+        UUID that may have changed underneath us."""
         try:
-            return fn()
+            self._store = self._init_store()
+        except Exception:
+            logger.exception("Failed to refresh Chroma wrapper.")
+
+    def _search_with_retry(self, op_name: str, fn_factory):
+        """Run a chroma similarity call, retry once on transient errors.
+
+        ``fn_factory`` must be a zero-arg callable that READS ``self._store``
+        each time it's invoked -- the retry path replaces ``self._store``,
+        so capturing it in a closure beforehand would defeat the recovery."""
+        try:
+            return fn_factory()
         except Exception as exc:
             msg = str(exc).lower()
             transient = any(h in msg for h in self._TRANSIENT_HINTS)
             if transient:
                 logger.warning(
-                    "%s hit a transient error (%s); retrying once...",
+                    "%s hit a transient error (%s); refreshing Chroma and retrying...",
                     op_name, exc.__class__.__name__,
                 )
+                self._refresh_store()
                 try:
-                    return fn()
+                    return fn_factory()
                 except Exception as exc2:
                     logger.exception("%s failed on retry too.", op_name)
                     raise RuntimeError(
                         f"Vector search failed: {exc2.__class__.__name__}: {exc2}. "
-                        "If this keeps happening, restart the app to clear any stale "
-                        "ChromaDB locks."
+                        "If this keeps happening, restart the app."
                     ) from exc2
-            logger.exception("%s failed: %s", op_name, query if 'query' in locals() else "")
+            logger.exception("%s failed.", op_name)
             raise RuntimeError(
                 f"Vector search failed: {exc.__class__.__name__}: {exc}"
             ) from exc
@@ -244,6 +269,8 @@ class LocalVectorStore:
         where = self._build_filter(filter, filenames)
         return self._search_with_retry(
             "Similarity search",
+            # NOTE: read self._store inside the lambda each call -- the
+            # retry path may have replaced it after a NotFoundError.
             lambda: self._store.similarity_search(query, k=k, filter=where),
         )
 
@@ -269,11 +296,21 @@ class LocalVectorStore:
     def list_filenames(self) -> List[str]:
         """All distinct `filename` values currently in the collection.
         Useful for the UI's 'search scope' selector."""
+        def _get():
+            return self._store._collection.get(include=["metadatas"])  # noqa: SLF001
         try:
-            data = self._store._collection.get(include=["metadatas"])  # noqa: SLF001
-        except Exception:
-            logger.exception("Failed to enumerate filenames.")
-            return []
+            data = _get()
+        except Exception as exc:
+            if any(h in str(exc).lower() for h in self._TRANSIENT_HINTS):
+                self._refresh_store()
+                try:
+                    data = _get()
+                except Exception:
+                    logger.exception("Failed to enumerate filenames after refresh.")
+                    return []
+            else:
+                logger.exception("Failed to enumerate filenames.")
+                return []
         names = {(m or {}).get("filename") for m in data.get("metadatas", [])}
         return sorted(n for n in names if n)
 
