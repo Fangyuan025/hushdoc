@@ -1,5 +1,7 @@
 # 🤫 Hushdoc
 
+**English** · [中文](README.zh-CN.md)
+
 > **Chat with your documents — privately, offline, on your own machine.**
 
 Drop in a PDF, Word doc, or even a photo of a page, and Hushdoc lets you
