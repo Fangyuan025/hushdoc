@@ -35,8 +35,11 @@ web/*.log
 /*.err
 .claude/
 
-# Eval + test fixtures: kept locally for development, not shipped to users
-# (users don't need ragas / datasets / pyarrow for the chat path).
+# Eval + dev-only tests + test fixtures: kept locally for the maintainer,
+# not shipped to users (they don't need ragas / datasets / pyarrow for
+# the chat path, and the smoke / integration tests aren't part of the UX).
 evaluate.py
 eval_dataset.json
+smoke_test.py
+test_api.py
 data/attention.pdf
