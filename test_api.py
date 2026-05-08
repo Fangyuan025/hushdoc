@@ -24,7 +24,25 @@ import httpx
 
 BASE = "http://127.0.0.1:8000"
 ROOT = Path(__file__).parent
-PDF = ROOT / "data" / "attention.pdf"
+
+
+def _find_test_pdf() -> Path | None:
+    """Find any PDF for the upload smoke test. Prefers a developer-local
+    fixture at data/attention.pdf (gitignored, kept by maintainer);
+    falls back to whatever the user has previously uploaded into
+    data/uploads/. Returns None if nothing is available so the upload
+    test can be skipped instead of hard-failing."""
+    fixed = ROOT / "data" / "attention.pdf"
+    if fixed.exists():
+        return fixed
+    uploads = ROOT / "data" / "uploads"
+    if uploads.is_dir():
+        for p in sorted(uploads.glob("*.pdf")):
+            return p
+    return None
+
+
+PDF = _find_test_pdf()
 
 
 def parse_sse(text: str) -> list[tuple[str, object]]:
@@ -75,20 +93,24 @@ with httpx.Client(base_url=BASE, timeout=600) as client:
     print(client.delete("/api/documents").json())
 
     print("\n" + "=" * 70)
-    print("UPLOAD attention.pdf  (SSE)")
+    print(f"UPLOAD {PDF.name if PDF else '(no PDF available — skipping)'}  (SSE)")
     print("=" * 70)
-    with PDF.open("rb") as fh:
-        with client.stream(
-            "POST",
-            "/api/documents/upload",
-            files={"files": (PDF.name, fh, "application/pdf")},
-            data={"replace": "true"},
-        ) as resp:
-            buf = ""
-            for chunk in resp.iter_text():
-                buf += chunk
-        for ev, payload in parse_sse(buf):
-            print(f"  [{ev}] {payload}")
+    if PDF is None:
+        print("  No PDF found at data/attention.pdf or data/uploads/*.pdf;")
+        print("  skipping the upload test. Drop a PDF into data/uploads/ to enable.")
+    else:
+        with PDF.open("rb") as fh:
+            with client.stream(
+                "POST",
+                "/api/documents/upload",
+                files={"files": (PDF.name, fh, "application/pdf")},
+                data={"replace": "true"},
+            ) as resp:
+                buf = ""
+                for chunk in resp.iter_text():
+                    buf += chunk
+            for ev, payload in parse_sse(buf):
+                print(f"  [{ev}] {payload}")
 
     print("\n" + "=" * 70)
     print("LIST docs")

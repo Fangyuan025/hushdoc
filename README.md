@@ -219,8 +219,7 @@ Stack: **FastAPI** (Python 3.12) + **React 19** + **Vite** +
 **Tailwind / shadcn**, talking to **llama.cpp**'s standalone
 `llama-server` over its OpenAI-compatible HTTP API. Vector store is
 **ChromaDB**. Document parsing is **IBM Docling**. Voice uses
-**Whisper-base.en** (ASR) and **Kokoro-82M** (TTS). Offline evaluation
-is **Ragas** with the local model as judge.
+**Whisper-base.en** (ASR) and **Kokoro-82M** (TTS).
 
 ---
 
@@ -237,7 +236,6 @@ hushdoc/
 ├── llama_server.py  llama-server.exe lifecycle manager
 ├── doc_summaries.py per-file summary cache
 ├── voice.py         Whisper ASR + Kokoro TTS
-├── evaluate.py      offline Ragas scoring
 ├── setup.bat        one-time installer (deps + runtime + model)
 ├── hushdoc.bat      one-click launcher with cleanup prompt
 └── dev.sh / dev.ps1 plain dev launchers (no auto-cleanup)

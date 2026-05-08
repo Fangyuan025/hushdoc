@@ -34,3 +34,9 @@ web/*.log
 /*.pdf
 /*.err
 .claude/
+
+# Eval + test fixtures: kept locally for development, not shipped to users
+# (users don't need ragas / datasets / pyarrow for the chat path).
+evaluate.py
+eval_dataset.json
+data/attention.pdf

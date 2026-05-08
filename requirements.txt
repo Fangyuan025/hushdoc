@@ -19,10 +19,6 @@ langchain-chroma>=0.1.4
 langchain-huggingface>=0.1.0
 langchain-openai>=0.2.0      # ChatOpenAI client pointed at llama-server
 
-# --- Evaluation (Offline) ---
-ragas>=0.2.0
-datasets>=2.20.0
-
 # --- HTTP API ---
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
@@ -41,5 +37,4 @@ soundfile>=0.12.0            # WAV decode (Whisper input) + encode (Kokoro outpu
 
 # --- Utilities ---
 pydantic>=2.7.0
-pandas>=2.2.0
 requests>=2.31.0             # used by llama_server.py for /health probe
