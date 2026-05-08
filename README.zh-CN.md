@@ -1,19 +1,19 @@
 # 🤫 Hushdoc
 
 <p align="center">
-  <a href="https://github.com/Fangyuan025/hushdoc/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/Fangyuan025/hushdoc?style=for-the-badge&color=2ea44f&label=release"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow?style=for-the-badge"></a>
-  <img alt="完全本地运行" src="https://img.shields.io/badge/🛡️_local-only-1f6feb?style=for-the-badge">
-  <img alt="中英双语" src="https://img.shields.io/badge/🌍_bilingual-中%2FEN-7c3aed?style=for-the-badge">
+  <a href="https://github.com/Fangyuan025/hushdoc/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/Fangyuan025/hushdoc?style=for-the-badge&color=2ea44f"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow.svg?style=for-the-badge"></a>
+  <img alt="Local-only" src="https://img.shields.io/badge/local--only-1f6feb.svg?style=for-the-badge&logo=ghostery&logoColor=white">
+  <img alt="Bilingual" src="https://img.shields.io/badge/bilingual-zh%20%2B%20en-7c3aed.svg?style=for-the-badge&logo=googletranslate&logoColor=white">
 </p>
 
 <p align="center">
-  <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white">
-  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white">
-  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=000">
-  <img alt="Vite" src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white">
-  <img alt="llama.cpp" src="https://img.shields.io/badge/llama.cpp-subprocess-FF6B6B?style=for-the-badge">
-  <img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-vectors-FFCD42?style=for-the-badge">
+  <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776AB.svg?style=for-the-badge&logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688.svg?style=for-the-badge&logo=fastapi&logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB.svg?style=for-the-badge&logo=react&logoColor=000">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-646CFF.svg?style=for-the-badge&logo=vite&logoColor=white">
+  <img alt="llama.cpp" src="https://img.shields.io/badge/llama-cpp-FF6B6B.svg?style=for-the-badge">
+  <img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-vectors-FFCD42.svg?style=for-the-badge">
 </p>
 
 <p align="center">
