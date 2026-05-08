@@ -105,7 +105,13 @@ You need:
 - [Python 3.12](https://www.python.org/downloads/release/python-3120/)
   (tick *Add to PATH* during install)
 - [Node.js 20+](https://nodejs.org/) (LTS is fine)
-- ~3 GB free disk for the default model + AI runtime
+- **~10 GB free disk** for a complete install. Roughly:
+  - `.venv/` — Python deps (~6 GB; ~4.4 GB of that is PyTorch w/ CUDA)
+  - `~/.cache/huggingface/` — embedding + Whisper + Kokoro + Docling
+    layout/table models (~1.3 GB, downloaded lazily on first use)
+  - `models/model.gguf` — default LLM (~1.2 GB)
+  - `runtime/` — `llama-server.exe` + DLLs (~750 MB GPU build, ~50 MB CPU)
+  - `web/node_modules/` — frontend deps (~200 MB)
 - An NVIDIA GPU is **optional** — speeds up large models, but the
   default Qwen3-1.7B runs comfortably on CPU.
 
