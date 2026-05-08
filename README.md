@@ -1,9 +1,27 @@
 # 🤫 Hushdoc
 
-**English** · [中文](README.zh-CN.md)
-&nbsp;&nbsp;|&nbsp;&nbsp;
-[Releases](https://github.com/Fangyuan025/hushdoc/releases) ·
-[Changelog](CHANGELOG.md)
+<p align="center">
+  <a href="https://github.com/Fangyuan025/hushdoc/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/Fangyuan025/hushdoc?style=for-the-badge&color=2ea44f&label=release"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow?style=for-the-badge"></a>
+  <img alt="Local-only" src="https://img.shields.io/badge/🛡️_local-only-1f6feb?style=for-the-badge">
+  <img alt="Bilingual" src="https://img.shields.io/badge/🌍_bilingual-中%2FEN-7c3aed?style=for-the-badge">
+</p>
+
+<p align="center">
+  <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=000">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white">
+  <img alt="llama.cpp" src="https://img.shields.io/badge/llama.cpp-subprocess-FF6B6B?style=for-the-badge">
+  <img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-vectors-FFCD42?style=for-the-badge">
+</p>
+
+<p align="center">
+  <b>English</b> · <a href="README.zh-CN.md">中文</a>
+  &nbsp;|&nbsp;
+  <a href="https://github.com/Fangyuan025/hushdoc/releases">Releases</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
 > **Chat with your documents — privately, offline, on your own machine.**
 
