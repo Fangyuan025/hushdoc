@@ -152,6 +152,15 @@ setup downloaded. Pick something that fits your RAM — for example:
 
 You can also point at any other path via the `LLAMA_MODEL_PATH` env var.
 
+> **Note on prompts:** the system prompts include Qwen3's `/no_think` soft
+> switch (which suppresses Qwen3's `<think>...</think>` reasoning block).
+> Non-Qwen3 chat templates ignore this token, so swapping in Llama /
+> Mistral / Phi / Qwen2.5 etc. **just works** — the 9-character prefix
+> is silently dropped by their tokenizers. A separate streaming filter
+> strips any `<think>` blocks that do leak through (relevant for
+> reasoning models like DeepSeek-R1 / QwQ), so the user-visible answer
+> is always clean regardless of model family.
+
 ### Manual setup (if you'd rather not use the script)
 
 ```powershell
