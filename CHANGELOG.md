@@ -4,6 +4,58 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.2.2] — 2026-05-13
+
+Ingest UX: cancelable + noticeably faster on multi-file batches.
+
+### Added
+- **Cancel ingest button.** During an in-flight upload the Library's
+  `+ Add to library` morphs into a red `Cancel` next to it. Click it
+  and:
+  - the SSE fetch is aborted client-side (no more event traffic to
+    process)
+  - `POST /api/documents/upload/cancel` flips a server-side flag the
+    ingest loop checks BETWEEN files, so the current file's Docling
+    parse (in a worker thread, can't be aborted mid-pass) finishes
+    cleanly but the rest of the queue is dropped
+  - the backend emits a `cancelled` SSE event with the
+    `completed / total / total_chunks` counts; the UI marks any still-
+    queued rows as `cancelled` and shows a friendly toast
+- New SSE event kind: `cancelled` (peer of `all_done`).
+- New endpoint: `POST /api/documents/upload/cancel`.
+
+### Changed
+- **Per-file LLM summary is now deferred** to a background asyncio
+  task that fires after the SSE stream closes. The summary used to
+  run inline AFTER chunking + embedding for every file, adding 3-10 s
+  per doc to the critical path on Qwen3-1.7B. For a 10-file folder
+  pick that's 30-100 s the user used to stare at the progress bar
+  for. Now `file_done` arrives the moment the chunks are in chroma;
+  the summary lands silently in `doc_summaries.json` ~5-15 s later
+  per file. Verified end-to-end: a 91-chunk PDF that previously took
+  ~40 s now reports `all_done` at ~32 s, with the summary appearing
+  in `/api/documents` within ~10 s after that.
+- `file_done` SSE payload's `summary` field is now always `""`
+  (frontend doesn't currently surface summaries during ingest, so
+  this is invisible to users). The cache still gets populated; the
+  chain's *Documents in scope* prompt overview works as before.
+
+### Internals
+- `_ingest_cancel: asyncio.Event` cleared at the top of each
+  `_ingest_files_streaming` invocation, set by the cancel endpoint.
+  Idempotent — repeated cancels are no-ops.
+- New `_backfill_summaries(items)` coroutine spawned via
+  `asyncio.create_task` so it survives the SSE stream closure. Runs
+  serially so it doesn't compete with the user's first chat turn for
+  the single llama-server slot.
+- `useDocuments.upload` now passes an `AbortController.signal` to the
+  upload fetch; the new `useDocuments.cancelUpload` fires the abort
+  and the server-side cancel POST together.
+- `AbortError` is filtered out of the upload-error toast path —
+  cancel isn't an error.
+
+[0.2.2]: https://github.com/Fangyuan025/hushdoc/releases/tag/v0.2.2
+
 ## [0.2.1] — 2026-05-13
 
 Hotfix for v0.2.0. **If you're on 0.2.0, upgrade now** — the Library

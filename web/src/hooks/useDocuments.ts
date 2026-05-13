@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import {
   useMutation,
   useQuery,
@@ -85,6 +85,10 @@ export function useDocuments() {
   const [progress, setProgress] = useState<UploadProgress>(EMPTY_PROGRESS)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  // Held across re-renders so cancelUpload() can abort the in-flight
+  // fetch. Reset to null in the `finally` of upload() so a fresh cycle
+  // always starts with a clean controller.
+  const abortRef = useRef<AbortController | null>(null)
 
   const upload = useCallback(
     async (
@@ -101,6 +105,8 @@ export function useDocuments() {
         done: false,
       })
 
+      const ac = new AbortController()
+      abortRef.current = ac
       try {
         const fd = new FormData()
         for (const f of files) fd.append("files", f, f.name)
@@ -114,6 +120,7 @@ export function useDocuments() {
         const resp = await fetch("/api/documents/upload", {
           method: "POST",
           body: fd,
+          signal: ac.signal,
         })
         if (!resp.ok) throw new Error(`upload -> ${resp.status}`)
         if (!resp.body) throw new Error("upload response has no body")
@@ -187,6 +194,28 @@ export function useDocuments() {
                 `Indexed ${p.succeeded}/${p.total} files. Some failed.`,
               )
             }
+          } else if (ev === "cancelled") {
+            // Server-side cancel acknowledgement -- the SSE stream ends
+            // cleanly here, no fetch error to swallow. Mark whatever
+            // hasn't run as 'cancelled' so the UI doesn't dangle on
+            // 'queued' rows forever.
+            const p = payload as {
+              completed: number
+              total: number
+              total_chunks: number
+            }
+            setProgress((old) => ({
+              ...old,
+              done: true,
+              files: old.files.map((f) =>
+                f.status === "queued"
+                  ? { ...f, status: "error", error: "cancelled" }
+                  : f,
+              ),
+            }))
+            toast.info(
+              `Ingest cancelled. ${p.completed}/${p.total} files indexed before stop.`,
+            )
           }
         }
 
@@ -206,17 +235,48 @@ export function useDocuments() {
         }
         flush()
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        setUploadError(msg)
-        toast.error(`Upload failed: ${msg}`)
+        // AbortError = user pressed Cancel. The backend already emitted
+        // its own 'cancelled' SSE event (or will, if the abort raced
+        // ahead of the network); either way, don't surface a red toast.
+        if (err instanceof Error && err.name === "AbortError") {
+          // No toast here — the 'cancelled' event handler above (or
+          // the cancel button's optimistic UI update) covers the user
+          // feedback. Avoids a duplicate-toast situation when both
+          // paths fire.
+        } else {
+          const msg = err instanceof Error ? err.message : String(err)
+          setUploadError(msg)
+          toast.error(`Upload failed: ${msg}`)
+        }
       } finally {
         setUploading(false)
+        abortRef.current = null
         // refresh the list so newly indexed files show up immediately
         qc.invalidateQueries({ queryKey: ["documents"] })
       }
     },
     [uploading, qc],
   )
+
+  /** Stop an in-flight ingest at the next file boundary. Aborts the SSE
+   *  fetch (frontend side) AND tells the backend to skip the rest of
+   *  its queue (server side) so a long Docling pass doesn't keep
+   *  spinning even after the UI gives up. v0.2.2. */
+  const cancelUpload = useCallback(() => {
+    if (!abortRef.current) return
+    // Optimistic mark on every still-queued row so the user sees the
+    // cancel land even before the backend's 'cancelled' event arrives.
+    setProgress((old) => ({
+      ...old,
+      files: old.files.map((f) =>
+        f.status === "queued" ? { ...f, status: "error", error: "cancelled" } : f,
+      ),
+    }))
+    void fetch("/api/documents/upload/cancel", { method: "POST" }).catch(() => {
+      /* best effort — the AbortController will still close the stream */
+    })
+    abortRef.current.abort()
+  }, [])
 
   const dismissProgress = useCallback(() => setProgress(EMPTY_PROGRESS), [])
 
@@ -226,6 +286,7 @@ export function useDocuments() {
     delOne,
     pasteText,
     upload,
+    cancelUpload,
     uploading,
     uploadError,
     progress,

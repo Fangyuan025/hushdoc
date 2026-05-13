@@ -212,13 +212,26 @@ def _stamp_file_metadata(
         d.metadata.setdefault("source_kind", source_kind)
 
 
+# v0.2.2: cooperative cancel for in-flight ingest. The streaming loop
+# checks this between files so a runaway folder ingest can be stopped
+# without killing the backend. Per-process flag is fine because only
+# one ingest can run at a time today (FastAPI handles concurrent
+# uploads but the chain's chroma + summary writes serialize anyway).
+_ingest_cancel = asyncio.Event()
+
+
 async def _ingest_files_streaming(
     paths: list[Path],
     source_kind: str = "uploaded",
 ) -> AsyncIterator[tuple[str, dict]]:
-    """Per-file ingest, yielding ('file_done', {...}) after each, then
-    a final ('all_done', {...}). Heavy work runs in a thread so the
-    event loop stays responsive.
+    """Per-file ingest, yielding ('file_done', {...}) after each, a final
+    ('all_done', {...}), or ('cancelled', {...}) if the user hits cancel.
+
+    Heavy work runs in a thread so the event loop stays responsive. The
+    expensive per-file LLM summary is DEFERRED to a background task
+    fired after all_done -- it's not needed until the user actually
+    asks a question, and waiting on it serially used to add 3-10 s per
+    file on the critical path.
 
     ``source_kind`` lets the upload endpoint mark whether the file came
     from a single drag-drop ('uploaded') or a bulk folder pick
@@ -227,10 +240,19 @@ async def _ingest_files_streaming(
     ingestor = deps.get_ingestor()
     store = deps.get_store()
 
+    # Fresh cancel epoch for THIS upload. Previous /cancel hits that
+    # arrived after the last upload finished are discarded here.
+    _ingest_cancel.clear()
+
     total_chunks = 0
     succeeded = 0
+    # (filename, full_text) pairs queued for background summarization
+    # after the SSE stream closes. Capturing the text up front because
+    # the chunk text is already in chroma; reading it back from there
+    # would just round-trip the same data.
+    summary_queue: list[tuple[str, str]] = []
 
-    def _ingest_one(p: Path) -> dict:
+    def _ingest_one(p: Path) -> tuple[dict, str]:
         result = ingestor.ingest(p)
         try:
             file_size = p.stat().st_size
@@ -243,28 +265,64 @@ async def _ingest_files_streaming(
         full_text = result.markdown or "\n\n".join(
             d.page_content for d in result.documents
         )
-        summary = chain.summarize_document(p.name, full_text) or ""
-        return {
+        payload = {
             "filename": p.name,
             "chunks": result.chunk_count,
-            "summary": summary,
+            # Summary still empty at this point; backfilled in the
+            # background task below. The frontend doesn't surface it
+            # anywhere user-visible during ingest, so the empty value
+            # is harmless until the chain actually queries it.
+            "summary": "",
         }
+        return payload, full_text
 
     for p in paths:
+        if _ingest_cancel.is_set():
+            logger.info(
+                "Ingest cancelled by user; %d/%d files completed before cancel.",
+                succeeded, len(paths),
+            )
+            yield ("cancelled", {
+                "completed": succeeded,
+                "total": len(paths),
+                "total_chunks": total_chunks,
+            })
+            break
         try:
-            payload = await asyncio.to_thread(_ingest_one, p)
+            payload, full_text = await asyncio.to_thread(_ingest_one, p)
             total_chunks += payload["chunks"]
             succeeded += 1
+            summary_queue.append((p.name, full_text))
             yield ("file_done", payload)
         except Exception as exc:
             logger.exception("Failed to ingest %s", p)
             yield ("file_error", {"filename": p.name, "error": str(exc)})
+    else:
+        # Loop completed without a `break` from the cancel branch.
+        yield ("all_done", {
+            "succeeded": succeeded,
+            "total": len(paths),
+            "total_chunks": total_chunks,
+        })
 
-    yield ("all_done", {
-        "succeeded": succeeded,
-        "total": len(paths),
-        "total_chunks": total_chunks,
-    })
+    # Fire-and-forget summary backfill. Runs even after the user
+    # cancels so the partial set of completed files still gets its
+    # summaries. doc_summaries cache is idempotent so re-runs are safe.
+    if summary_queue:
+        asyncio.create_task(_backfill_summaries(summary_queue))
+
+
+async def _backfill_summaries(items: list[tuple[str, str]]) -> None:
+    """Generate per-document summaries serially in the background after
+    the ingest SSE stream has already closed. We process serially so
+    we don't compete with the user's first chat turn for the single
+    llama-server slot."""
+    chain = deps.get_chain()
+    for filename, full_text in items:
+        try:
+            await asyncio.to_thread(chain.summarize_document, filename, full_text)
+        except Exception:
+            logger.exception("Background summary failed for %s", filename)
 
 
 @app.post("/api/documents/upload")
@@ -302,6 +360,20 @@ async def upload_documents(
         events_to_sse(_ingest_files_streaming(paths)),
         media_type="text/event-stream",
     )
+
+
+@app.post("/api/documents/upload/cancel")
+def cancel_upload() -> dict:
+    """Stop the in-flight ingest at the NEXT file boundary. The current
+    file's Docling parse (already in a worker thread) will run to
+    completion -- we can't safely abort that mid-pass -- but every
+    remaining file in the queue is dropped, and a 'cancelled' SSE
+    event is emitted so the frontend can clear its progress UI.
+
+    Idempotent: setting an already-set event is a no-op."""
+    _ingest_cancel.set()
+    logger.info("Ingest cancel flag set.")
+    return {"ok": True}
 
 
 @app.post("/api/documents/paste")

@@ -20,6 +20,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Plus,
+  Square,
   Trash2,
   Upload,
   XCircle,
@@ -58,6 +59,7 @@ export function Library({ onScopeChange }: LibraryProps) {
     delOne,
     pasteText,
     upload,
+    cancelUpload,
     uploading,
     progress,
     dismissProgress,
@@ -150,12 +152,14 @@ export function Library({ onScopeChange }: LibraryProps) {
   // ---- Render -----------------------------------------------------------
   return (
     <div className="space-y-2">
-      {/* Add menu */}
-      <div className="relative">
+      {/* Add menu / Cancel split: during ingest the button morphs into a
+          Cancel control so a runaway folder pick can be stopped without
+          killing the backend. */}
+      <div className="relative flex gap-1">
         <Button
           size="sm"
           variant="outline"
-          className="w-full justify-start text-xs"
+          className="flex-1 justify-start text-xs"
           onClick={() => setMenuOpen((v) => !v)}
           disabled={uploading}
         >
@@ -171,6 +175,18 @@ export function Library({ onScopeChange }: LibraryProps) {
             </>
           )}
         </Button>
+        {uploading && (
+          <Button
+            size="sm"
+            variant="destructive"
+            className="text-xs"
+            onClick={cancelUpload}
+            title="Cancel — finish the current file, then stop"
+          >
+            <Square className="h-3 w-3 fill-current" />
+            Cancel
+          </Button>
+        )}
         {menuOpen && !uploading && (
           <AddMenu
             onPickFiles={() => fileInputRef.current?.click()}
