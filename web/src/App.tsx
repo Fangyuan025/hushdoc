@@ -15,6 +15,7 @@ import {
 import { Toaster } from "sonner"
 
 import { ChatPane, type ChatPaneHandle } from "@/components/ChatPane"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { Sidebar, SidebarContent } from "@/components/Sidebar"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
@@ -315,17 +316,19 @@ function Shell() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={qc}>
-      <Shell />
-      <Toaster
-        position="bottom-right"
-        toastOptions={{
-          classNames: {
-            toast:
-              "border bg-background text-foreground shadow-md rounded-md text-sm",
-          },
-        }}
-      />
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={qc}>
+        <Shell />
+          <Toaster
+          position="bottom-right"
+          toastOptions={{
+            classNames: {
+              toast:
+                "border bg-background text-foreground shadow-md rounded-md text-sm",
+            },
+          }}
+        />
+      </QueryClientProvider>
+    </ErrorBoundary>
   )
 }

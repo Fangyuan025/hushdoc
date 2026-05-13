@@ -15,11 +15,15 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    /* Path aliases — match vite.config.ts */
+    /* Path aliases — match vite.config.ts. TS 7 will drop baseUrl as
+       a build flag (paths can be resolved relative to the config file
+       without it); silence the deprecation warning for now so `npm
+       run build` doesn't error out on tsc -b. */
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     },
+    "ignoreDeprecations": "6.0",
 
     /* Linting */
     "noUnusedLocals": true,

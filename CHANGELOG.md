@@ -4,6 +4,55 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.2.1] — 2026-05-13
+
+Hotfix for v0.2.0. **If you're on 0.2.0, upgrade now** — the Library
+panel had a TypeError that crashed the React render tree on every
+mount, leaving users staring at a blank page. Combined with the
+unbounded folder ingest, an accidental "wrong folder" pick on a fresh
+v0.2.0 install could lock the machine.
+
+### Fixed
+- **Library render crash.** `Library.tsx` called `.has()` / `.size` on
+  `scope.selected`, but `useScope` returns a plain `string[]` — not a
+  `Set`. Each mount threw `TypeError: scope.selected.has is not a
+  function` before the file list could paint, which React handled by
+  unmounting the subtree and leaving the page blank. Switched the
+  call sites to `.includes()` / `.length`.
+
+### Added
+- **Folder-ingest safety net.** `Library.onPickFolder` now caps a
+  single folder pick at 50 ingestible files. Anything bigger surfaces
+  a native `confirm()` dialog with the file count before kicking off
+  Docling. Prevents the "I accidentally picked my entire Desktop"
+  scenario from queuing hundreds of Docling parses and writing GBs to
+  `chroma_db` before the user can intervene.
+- **Top-level `ErrorBoundary`** wrapping `<App/>`. A render exception
+  no longer unmounts the entire tree silently — the user sees a
+  recovery panel with the error message + a Reload button. Console
+  still gets the full stack for bug reports.
+
+### Build
+- `tsconfig.app.json` gained `"ignoreDeprecations": "6.0"` so
+  `npm run build` no longer errors on the `baseUrl` TS 7 deprecation
+  warning (which previously broke the build silently for
+  contributors running `npm run build` instead of `npx tsc --noEmit`).
+- Two `@ts-expect-error` directives on the `webkitdirectory` /
+  `directory` input attributes removed (modern @types/react accepts
+  them, so they were flagged as unused-suppression errors).
+
+### Recovery notes for anyone who hit the freeze
+1. Kill any leftover `python.exe`, `node.exe`, and `llama-server.exe`
+   via Task Manager (the heartbeat watchdog only stops these when the
+   browser tab gracefully closes; a frozen page can't issue that).
+2. Inspect `chroma_db/` + `data/uploads/` — if either is unexpectedly
+   large (>100 MB), an unintended folder ingest started writing. Wipe
+   them and re-ingest the files you actually want.
+3. Pull `v0.2.1` and re-run `hushdoc.bat` — fresh boot, no further
+   action needed.
+
+[0.2.1]: https://github.com/Fangyuan025/hushdoc/releases/tag/v0.2.1
+
 ## [0.2.0] — 2026-05-13
 
 Theme: **"Bring it in (offline), prove it back, breathe."** Wider local

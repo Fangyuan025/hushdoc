@@ -114,13 +114,37 @@ export function Library({ onScopeChange }: LibraryProps) {
     setMenuOpen(false)
   }
 
+  // Hard upper bound on a single folder pick. Each ingest pulls Docling's
+  // ~770 MB layout model + does a per-file inference pass; an accidental
+  // "pick your whole Desktop" easily becomes a runaway that lights the
+  // CPU on fire and writes Gb to chroma_db before the user can stop it.
+  // 50 is plenty for real research / contract / paper batches; anything
+  // bigger should be a deliberate decision.
+  const FOLDER_FILE_LIMIT = 50
+
   const onPickFolder = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = Array.from(e.target.files ?? []).filter((f) =>
+    const all = Array.from(e.target.files ?? [])
+    const totalSeen = all.length
+    const picked = all.filter((f) =>
       ACCEPT.some((ext) => f.name.toLowerCase().endsWith(ext)),
     )
     e.currentTarget.value = ""
-    if (picked.length) void upload(picked, false, "folder")
     setMenuOpen(false)
+    if (picked.length === 0) {
+      return
+    }
+    // If the folder is dangerously big, confirm before kicking off Docling.
+    // Native confirm() is fine here — this is the safety net, not the
+    // main flow.
+    if (picked.length > FOLDER_FILE_LIMIT) {
+      const ok = window.confirm(
+        `This folder contains ${picked.length} ingestible files ` +
+          `(saw ${totalSeen} total). Indexing them all may take a while ` +
+          `and use significant disk + CPU. Continue?`,
+      )
+      if (!ok) return
+    }
+    void upload(picked, false, "folder")
   }
 
   // ---- Render -----------------------------------------------------------
@@ -171,11 +195,16 @@ export function Library({ onScopeChange }: LibraryProps) {
           ref={folderInputRef}
           type="file"
           multiple
-          // @ts-expect-error — `webkitdirectory` isn't in the React type
-          // but every modern browser supports it.
-          webkitdirectory=""
-          // @ts-expect-error — same for `directory`
-          directory=""
+          {...(
+            // `webkitdirectory` / `directory` aren't first-class React
+            // input props but every modern browser supports them; spread
+            // them as untyped HTML attributes so TS stays happy without
+            // a brittle @ts-expect-error.
+            {
+              webkitdirectory: "",
+              directory: "",
+            } as React.HTMLAttributes<HTMLInputElement>
+          )}
           className="hidden"
           onChange={onPickFolder}
         />
@@ -215,7 +244,7 @@ export function Library({ onScopeChange }: LibraryProps) {
         <>
           <ScopeToolbar
             total={files.length}
-            selected={scope.selected.size}
+            selected={scope.selected.length}
             allSelected={scope.allSelected}
             onAll={scope.selectAll}
             onNone={scope.selectNone}
@@ -225,7 +254,7 @@ export function Library({ onScopeChange }: LibraryProps) {
               <FileRow
                 key={file.filename}
                 file={file}
-                checked={scope.selected.has(file.filename)}
+                checked={scope.selected.includes(file.filename)}
                 onToggle={() => scope.toggle(file.filename)}
                 onDelete={() => delOne.mutate(file.filename)}
                 deleting={delOne.isPending && delOne.variables === file.filename}
