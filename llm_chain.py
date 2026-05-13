@@ -503,11 +503,14 @@ def format_documents(
 # ---------------------------------------------------------------------------
 # Citation parsing for source filtering.
 # ---------------------------------------------------------------------------
-# Match `[filename.pdf p.5]`, `[filename.pdf p. 5]`, `[filename.pdf, p.5]`,
-# `[filename.pdf p.5-7]`. Filenames in our metadata always end in a known
-# extension; require ".pdf" to keep the pattern strict.
+# Match `[filename.ext p.5]`, `[filename.ext p. 5]`, `[filename.ext, p.5]`,
+# `[filename.ext p.5-7]` for any of our supported source extensions.
+# v0.2.0 broadened beyond .pdf to also accept .docx / .md / .txt / images,
+# otherwise citations on pasted text / markdown notes never matched and
+# the Sources panel silently fell through to showing every retrieved doc.
 _CITATION_RE = re.compile(
-    r"\[([^\[\]]+?\.pdf)\s*[, ]\s*(?:p\.?|page)\s*(\d+(?:\s*[-–]\s*\d+)?)\]",
+    r"\[([^\[\]]+?\.(?:pdf|docx|md|markdown|txt|jpe?g|png|tiff?|bmp))"
+    r"\s*[, ]\s*(?:p\.?|page)\s*(\d+(?:\s*[-–]\s*\d+)?)\]",
     re.IGNORECASE,
 )
 
@@ -795,14 +798,23 @@ class RAGChain:
 
             # Cross-encoder rerank: rescores (query, candidate) pairs and
             # keeps the top-k. No-op if reranker load failed or candidates
-            # already fit the budget.
+            # already fit the budget. The 'trace' variant also returns
+            # per-candidate score / rank info for the UI's Retrieval-trace
+            # panel; we stash it on state so the streaming path can ship
+            # it out in the `done` event without restructuring the chain.
             if self.use_reranker and len(candidates) > self.k:
-                from reranker import rerank
-                docs = rerank(query, candidates, top_k=self.k)
+                from reranker import rerank_with_trace
+                docs, trace = rerank_with_trace(query, candidates, top_k=self.k)
                 mode = base_mode + "+rerank"
             else:
-                docs = candidates[: self.k]
+                from reranker import rerank_with_trace
+                docs, trace = rerank_with_trace(query, candidates, top_k=self.k)
                 mode = base_mode
+
+            # Tag each trace entry with which retrieval mode produced it
+            # (frontend renders this as a small badge above the trace tab).
+            state["retrieval_trace"] = trace
+            state["retrieval_mode"] = mode
 
             scope_label = ",".join(filenames) if filenames else "ALL"
             logger.info(
@@ -1087,6 +1099,31 @@ class RAGChain:
         # the full list under all_source_documents for callers that want it.
         cited = filter_sources_by_citations(docs, cleaned)
 
+        # Mark every trace entry that ended up cited so the UI can render
+        # ★/✓ flags on the rows the LLM actually used. Citation match is
+        # on (filename.lower(), str(page)) -- same key the source-filter
+        # already used above.
+        cited_pairs = parse_citations(cleaned)
+        cited_key_set: set[tuple[str, str]] = set()
+        for fn, page in cited_pairs:
+            if "-" in page or "–" in page:
+                try:
+                    lo, hi = re.split(r"[-–]", page)
+                    for p in range(int(lo.strip()), int(hi.strip()) + 1):
+                        cited_key_set.add((fn.lower(), str(p)))
+                except Exception:
+                    cited_key_set.add((fn.lower(), page.strip()))
+            else:
+                cited_key_set.add((fn.lower(), page.strip()))
+
+        trace = state.get("retrieval_trace") or []
+        for entry in trace:
+            key = (
+                str(entry.get("filename", "")).lower(),
+                str(entry.get("page", "")),
+            )
+            entry["cited"] = key in cited_key_set
+
         yield ("done", {
             "question": question,
             "standalone_question": standalone,
@@ -1095,6 +1132,9 @@ class RAGChain:
             "all_source_documents": docs,
             "chitchat": False,
             "scope": list(filenames) if filenames else None,
+            # v0.2.0: per-candidate retrieval trace for the UI's drawer.
+            "retrieval_trace": trace,
+            "retrieval_mode": state.get("retrieval_mode", ""),
         })
 
     # ----------------------------------------------------------- summaries

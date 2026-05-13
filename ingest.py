@@ -50,7 +50,12 @@ DEFAULT_DATA_DIR = Path("./data")
 PDF_SUFFIXES = {".pdf"}
 DOCX_SUFFIXES = {".docx"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-SUPPORTED_SUFFIXES = PDF_SUFFIXES | DOCX_SUFFIXES | IMAGE_SUFFIXES
+# Plain text + markdown skips Docling entirely (no layout/OCR model needed).
+# Treated as a single "page 1" downstream because the citation chip
+# already shows '[filename p.N]'; pinning to 1 keeps that surface intact
+# without forcing the chain to handle page=None.
+TEXT_SUFFIXES = {".txt", ".md", ".markdown"}
+SUPPORTED_SUFFIXES = PDF_SUFFIXES | DOCX_SUFFIXES | IMAGE_SUFFIXES | TEXT_SUFFIXES
 
 
 @dataclass
@@ -137,6 +142,10 @@ class PDFIngestor:
         return path.suffix.lower() in DOCX_SUFFIXES
 
     @staticmethod
+    def _is_plaintext(path: Path) -> bool:
+        return path.suffix.lower() in TEXT_SUFFIXES
+
+    @staticmethod
     def _clean_text(text: str) -> str:
         # Collapse excessive blank lines while keeping paragraph breaks.
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
@@ -145,10 +154,13 @@ class PDFIngestor:
     # --------------------------------------------------------------- main API
     def ingest(self, src_path: str | Path) -> IngestionResult:
         """
-        Convert a single PDF, DOCX, or document image (JPG/PNG/TIFF/BMP)
-        into Markdown + a list of LangChain Documents. Images go through
-        Docling's image pipeline which runs OCR via RapidOCR; DOCX is
-        parsed natively from its XML.
+        Convert a single document into Markdown + a list of LangChain
+        Documents. Routes by extension:
+            PDF   -> Docling layout pipeline
+            DOCX  -> Docling Word backend (native XML)
+            image -> Docling image pipeline (RapidOCR)
+            txt   -> direct read + RecursiveCharacterTextSplitter
+            md    -> same as txt but with markdown-aware separators
 
         Returns
         -------
@@ -156,6 +168,13 @@ class PDFIngestor:
             Populated with markdown and chunked Documents.
         """
         src_path = self._validate_path(Path(src_path))
+
+        # Fast path: plain text and markdown skip Docling entirely. Saves
+        # the ~770 MB layout model load + tens of seconds of cold start
+        # for what is fundamentally already-structured text.
+        if self._is_plaintext(src_path):
+            return self._ingest_plaintext(src_path)
+
         if self._is_image(src_path):
             kind = "image (OCR)"
         elif self._is_docx(src_path):
@@ -198,6 +217,70 @@ class PDFIngestor:
         return IngestionResult(
             source_path=src_path,
             markdown=markdown,
+            documents=documents,
+        )
+
+    def ingest_text(
+        self,
+        text: str,
+        filename: str,
+    ) -> IngestionResult:
+        """In-memory ingest for pasted text. Doesn't touch disk -- the
+        caller decides whether to persist the source. Uses the same
+        plaintext splitter / metadata shape as a .md/.txt file ingest
+        so downstream the chain can't tell the difference.
+
+        ``filename`` is what shows up in the UI's Library list and in
+        citation chips, so callers should pick something descriptive
+        (e.g. derived from the first line of the pasted content)."""
+        logger.info("Ingesting pasted text as %s (%d chars).", filename, len(text))
+        text = self._clean_text(text)
+        if not text:
+            return IngestionResult(
+                source_path=Path(filename),
+                markdown="",
+                documents=[],
+            )
+
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=900,
+            chunk_overlap=120,
+            separators=[
+                "\n# ", "\n## ", "\n### ", "\n#### ",
+                "\n\n", "\n",
+                ". ", "? ", "! ", "。", "？", "！",
+                " ", "",
+            ],
+        )
+        parts = splitter.split_text(text)
+        heading_re = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+        current_heading = ""
+
+        documents: List[Document] = []
+        for idx, chunk in enumerate(parts):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            m = heading_re.search(chunk[:200])
+            if m:
+                current_heading = m.group(2).strip()
+            documents.append(Document(
+                page_content=chunk,
+                metadata={
+                    # 'source' is purely informational here -- there's no
+                    # file on disk, so we use a virtual marker.
+                    "source": f"<paste:{filename}>",
+                    "filename": filename,
+                    "chunk_index": idx,
+                    "page": 1,
+                    "headings": current_heading,
+                },
+            ))
+
+        return IngestionResult(
+            source_path=Path(filename),
+            markdown=text,
             documents=documents,
         )
 
@@ -284,6 +367,79 @@ class PDFIngestor:
             documents.append(Document(page_content=text, metadata=metadata))
 
         return documents
+
+    # -------------------------------------------------------- plaintext path
+    def _ingest_plaintext(self, src_path: Path) -> IngestionResult:
+        """Direct-read + recursive splitter for .txt / .md / .markdown.
+        Avoids Docling entirely so a 5 KB note doesn't pay for the 770 MB
+        layout model. Markdown headings are tracked so each chunk's
+        nearest H1/H2/H3 ends up in metadata['headings'] -- same shape
+        the Docling-derived chunks use, so the rest of the chain is
+        format-agnostic."""
+        logger.info("Reading plain text: %s", src_path.name)
+        text = src_path.read_text(encoding="utf-8", errors="replace")
+        text = self._clean_text(text)
+        if not text:
+            return IngestionResult(source_path=src_path, markdown="", documents=[])
+
+        # Lazy import — only paid when a user actually drops txt/md in.
+        # langchain_text_splitters arrives transitively via langchain_chroma.
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        # Markdown-aware separators: prefer to break on heading boundaries
+        # first, then paragraphs, then lines. chunk_size matches the
+        # HybridChunker token budget order-of-magnitude (~512 tokens
+        # ≈ ~900-1000 chars for English / Chinese mix).
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=900,
+            chunk_overlap=120,
+            separators=[
+                "\n# ", "\n## ", "\n### ", "\n#### ",  # markdown headings
+                "\n\n",                                  # paragraphs
+                "\n",
+                ". ", "? ", "! ", "。", "？", "！",      # sentence boundaries (en + zh)
+                " ", "",
+            ],
+        )
+        parts = splitter.split_text(text)
+
+        # Track the most recent heading we've seen in source order so each
+        # chunk can carry a 'headings' field. The splitter doesn't expose
+        # which separator it chose, so we just scan the chunk text.
+        heading_re = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+        current_heading = ""
+
+        documents: List[Document] = []
+        for idx, chunk in enumerate(parts):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            # Update current_heading if this chunk starts with one.
+            m = heading_re.search(chunk[:200])  # only scan top of chunk
+            if m:
+                current_heading = m.group(2).strip()
+            documents.append(Document(
+                page_content=chunk,
+                metadata={
+                    "source": str(src_path),
+                    "filename": src_path.name,
+                    "chunk_index": idx,
+                    # Plaintext has no pages, but the citation chip
+                    # expects [filename p.N]; pin to 1.
+                    "page": 1,
+                    "headings": current_heading,
+                },
+            ))
+
+        logger.info(
+            "Extracted %d plaintext chunks from %s (length: %d chars)",
+            len(documents), src_path.name, len(text),
+        )
+        return IngestionResult(
+            source_path=src_path,
+            markdown=text,
+            documents=documents,
+        )
 
 
 # ---------------------------------------------------------------------------

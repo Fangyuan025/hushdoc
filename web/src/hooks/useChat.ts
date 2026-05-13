@@ -297,6 +297,8 @@ export function useChat({
               chitchat: done.chitchat,
               sources: done.source_documents,
               standaloneQuery: done.standalone_question,
+              retrievalTrace: done.retrieval_trace,
+              retrievalMode: done.retrieval_mode,
             }
             setMessages((m) =>
               m.map((msg) => (msg.id === aiId ? finalMsg : msg)),

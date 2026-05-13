@@ -17,10 +17,42 @@ export interface HealthResponse {
   indexed_files: string[]
 }
 
+export interface FileMeta {
+  filename: string
+  chunk_count: number
+  /** Bytes; 0 for files indexed before v0.2.0 or for typed-text items. */
+  file_size: number
+  /** Epoch seconds; 0 for files indexed before v0.2.0. */
+  added_at: number
+  /** uploaded · folder · typed · unknown */
+  source_kind: "uploaded" | "folder" | "typed" | "unknown"
+}
+
 export interface DocumentsResponse {
   filenames: string[]
   chunk_count: number
   summaries: Record<string, string>
+  /** v0.2.0+: rich per-file metadata for the Library panel. May be
+   *  empty when talking to an older backend. */
+  files: FileMeta[]
+}
+
+/** v0.2.0: one bi-encoder candidate's journey through retrieval. */
+export interface RetrievalTraceEntry {
+  filename: string
+  page: number | null
+  chunk_index: number | null
+  /** First ~200 chars of the chunk text. */
+  snippet: string
+  /** 0-indexed position from the bi-encoder. */
+  rank_before: number
+  /** 0-indexed final rank, or null if this candidate was dropped after rerank. */
+  rank_after: number | null
+  /** Cross-encoder score; null when no rerank ran (small candidate set / no reranker). */
+  score_after: number | null
+  /** Set after the answer streams: true iff this candidate's (filename, page)
+   *  was inline-cited by the model. */
+  cited?: boolean
 }
 
 export interface DoneEvent {
@@ -30,6 +62,10 @@ export interface DoneEvent {
   source_documents: SourceDoc[]
   chitchat: boolean
   scope: string[] | null
+  /** v0.2.0+: per-candidate retrieval trace for the drawer's trace tab. */
+  retrieval_trace?: RetrievalTraceEntry[]
+  /** v0.2.0+: 'topk' | 'topk+rerank' | 'balanced' | 'balanced+rerank' | ''. */
+  retrieval_mode?: string
 }
 
 export interface ChatMessage {
@@ -46,4 +82,8 @@ export interface ChatMessage {
   standaloneQuery?: string
   /** Cached TTS audio for the replay icon, if voice mode synthesised one. */
   audioUrl?: string
+  /** v0.2.0+: per-candidate retrieval trace (populated on done). */
+  retrievalTrace?: RetrievalTraceEntry[]
+  /** v0.2.0+: 'topk', 'topk+rerank', etc. — surfaced as a small badge. */
+  retrievalMode?: string
 }

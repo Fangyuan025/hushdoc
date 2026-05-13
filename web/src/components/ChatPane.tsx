@@ -155,6 +155,25 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
       if (text) await sendWithCancel(text)
     }, [voice, sendWithCancel])
 
+    // Regenerate: re-run the most recent USER question that produced
+    // an assistant message. Walks backwards from the clicked assistant
+    // msg to its preceding user message; if found, fires sendWithCancel
+    // with the same text (the chain handles dedup / new conversation
+    // history naturally because this is just another turn).
+    const regenerateFor = useCallback(
+      (assistantId: string) => {
+        const idx = messages.findIndex((m) => m.id === assistantId)
+        if (idx <= 0) return
+        for (let i = idx - 1; i >= 0; i--) {
+          if (messages[i].role === "user") {
+            void sendWithCancel(messages[i].content)
+            return
+          }
+        }
+      },
+      [messages, sendWithCancel],
+    )
+
     return (
       <div className="relative flex h-full min-h-0 flex-1 flex-col">
         <ScrollArea ref={scrollRef} className="flex-1">
@@ -163,7 +182,16 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
               <EmptyState onPickPrompt={sendWithCancel} />
             ) : (
               messages.map((msg) => (
-                <ChatMessage key={msg.id} msg={msg} onReplay={voice.playUrl} />
+                <ChatMessage
+                  key={msg.id}
+                  msg={msg}
+                  onReplay={voice.playUrl}
+                  onRegenerate={
+                    msg.role === "assistant"
+                      ? () => regenerateFor(msg.id)
+                      : undefined
+                  }
+                />
               ))
             )}
             {error && (

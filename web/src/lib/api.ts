@@ -48,6 +48,21 @@ export const apiListDocuments = () => jsonGet<DocumentsResponse>("/documents")
 export const apiDeleteDocuments = () =>
   jsonSend<{ ok: boolean; was_count: number }>("/documents", undefined, "DELETE")
 
+/** Delete one indexed file by name. v0.2.0. */
+export const apiDeleteOneDocument = (filename: string) =>
+  jsonSend<{ ok: boolean; removed_chunks: number }>(
+    `/documents/${encodeURIComponent(filename)}`,
+    undefined,
+    "DELETE",
+  )
+
+/** Ingest raw pasted text directly. v0.2.0. */
+export const apiPasteText = (text: string, filename?: string) =>
+  jsonSend<{ filename: string; chunks: number; summary: string }>(
+    "/documents/paste",
+    { text, filename: filename ?? null },
+  )
+
 // ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------

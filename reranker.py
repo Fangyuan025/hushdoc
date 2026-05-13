@@ -59,28 +59,86 @@ def rerank(
     model_name: str = DEFAULT_MODEL,
 ) -> List[Document]:
     """Sort ``docs`` by cross-encoder relevance to ``query`` and keep the
-    top ``top_k``. Returns the bi-encoder order untouched if:
-      * the candidate set is already at-or-below the budget,
-      * the cross-encoder failed to load, or
-      * the predict call raised.
+    top ``top_k``. See ``rerank_with_trace`` for the version that also
+    returns per-candidate scores -- this thin wrapper exists for the
+    callers (non-streaming chain path) that don't care about the trace.
     """
+    docs_out, _trace = rerank_with_trace(query, docs, top_k, model_name)
+    return docs_out
+
+
+def rerank_with_trace(
+    query: str,
+    docs: Sequence[Document],
+    top_k: int,
+    model_name: str = DEFAULT_MODEL,
+) -> tuple[List[Document], List[dict]]:
+    """Like ``rerank`` but also returns a per-candidate trace usable by
+    the UI's Retrieval-trace panel. Each trace entry:
+
+        {
+          "filename":     str,    # from chunk metadata
+          "page":         int|None,
+          "chunk_index":  int|None,
+          "snippet":      str,    # first 200 chars of page_content
+          "rank_before":  int,    # 0-indexed bi-encoder rank
+          "rank_after":   int|None,  # 0-indexed final rank, or None if
+                                     # this candidate was dropped from
+                                     # the top-k
+          "score_after":  float|None,# cross-encoder score; None when no
+                                     # rerank ran (passthrough mode)
+        }
+
+    The trace covers EVERY bi-encoder candidate (not just the kept ones)
+    so the UI can show 'why was this candidate filtered out'."""
     if not docs:
-        return []
+        return [], []
+
+    def _entry(idx: int, d: Document) -> dict:
+        m = d.metadata or {}
+        return {
+            "filename": m.get("filename", ""),
+            "page": m.get("page"),
+            "chunk_index": m.get("chunk_index"),
+            "snippet": (d.page_content or "")[:200],
+            "rank_before": idx,
+            "rank_after": None,
+            "score_after": None,
+        }
+
+    trace = [_entry(i, d) for i, d in enumerate(docs)]
+
+    # Trivial passthrough: every candidate fits within the budget.
     if len(docs) <= top_k:
-        return list(docs)
+        for i, entry in enumerate(trace):
+            entry["rank_after"] = i
+        return list(docs), trace
 
     model = _load(model_name)
     if model is None:
-        return list(docs)[:top_k]
+        # Reranker unavailable -- keep the bi-encoder top_k unchanged.
+        for i in range(top_k):
+            trace[i]["rank_after"] = i
+        return list(docs)[:top_k], trace
 
     pairs = [(query, d.page_content) for d in docs]
     try:
         scores = model.predict(pairs, show_progress_bar=False)
     except Exception:
         logger.exception("Cross-encoder predict failed; returning bi-encoder order.")
-        return list(docs)[:top_k]
+        for i in range(top_k):
+            trace[i]["rank_after"] = i
+        return list(docs)[:top_k], trace
 
-    indexed = sorted(
-        zip(scores, docs), key=lambda x: float(x[0]), reverse=True,
-    )
-    return [d for _, d in indexed[:top_k]]
+    # Annotate every candidate with its cross-encoder score, then sort
+    # descending. The kept docs get rank_after set; the rest stay None.
+    for i, s in enumerate(scores):
+        trace[i]["score_after"] = float(s)
+
+    order = sorted(range(len(docs)), key=lambda i: -float(scores[i]))
+    new_docs: List[Document] = []
+    for new_rank, orig_idx in enumerate(order):
+        if new_rank < top_k:
+            trace[orig_idx]["rank_after"] = new_rank
+            new_docs.append(docs[orig_idx])
+    return new_docs, trace

@@ -6,7 +6,12 @@ import {
 } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import { apiDeleteDocuments, apiListDocuments } from "@/lib/api"
+import {
+  apiDeleteDocuments,
+  apiDeleteOneDocument,
+  apiListDocuments,
+  apiPasteText,
+} from "@/lib/api"
 
 interface UploadFileStatus {
   filename: string
@@ -51,12 +56,42 @@ export function useDocuments() {
     onError: (err) => toast.error(`Wipe failed: ${err.message}`),
   })
 
+  /** Delete a single indexed file by name. v0.2.0. */
+  const delOne = useMutation({
+    mutationFn: (filename: string) => apiDeleteOneDocument(filename),
+    onSuccess: (data, filename) => {
+      qc.invalidateQueries({ queryKey: ["documents"] })
+      if (data.removed_chunks > 0) {
+        toast.success(`Removed ${filename} (${data.removed_chunks} chunks).`)
+      } else {
+        toast.info(`${filename} was not indexed.`)
+      }
+    },
+    onError: (err, filename) =>
+      toast.error(`Couldn't delete ${filename}: ${err.message}`),
+  })
+
+  /** Ingest raw pasted text. Returns the server-assigned filename. v0.2.0. */
+  const pasteText = useMutation({
+    mutationFn: ({ text, filename }: { text: string; filename?: string }) =>
+      apiPasteText(text, filename),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["documents"] })
+      toast.success(`Added "${data.filename}" (${data.chunks} chunks).`)
+    },
+    onError: (err) => toast.error(`Paste failed: ${err.message}`),
+  })
+
   const [progress, setProgress] = useState<UploadProgress>(EMPTY_PROGRESS)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
   const upload = useCallback(
-    async (files: File[], replace: boolean) => {
+    async (
+      files: File[],
+      replace: boolean,
+      sourceKind: "uploaded" | "folder" = "uploaded",
+    ) => {
       if (files.length === 0 || uploading) return
       setUploading(true)
       setUploadError(null)
@@ -70,6 +105,11 @@ export function useDocuments() {
         const fd = new FormData()
         for (const f of files) fd.append("files", f, f.name)
         fd.append("replace", String(replace))
+        // sourceKind currently isn't read by the backend's upload route
+        // (it stamps 'uploaded' for everything multipart) but it's still
+        // worth threading through here so a future server-side handler
+        // can distinguish folder picks from drag-drops without a new API.
+        fd.append("source_kind", sourceKind)
 
         const resp = await fetch("/api/documents/upload", {
           method: "POST",
@@ -183,6 +223,8 @@ export function useDocuments() {
   return {
     list,
     del,
+    delOne,
+    pasteText,
     upload,
     uploading,
     uploadError,

@@ -77,7 +77,9 @@ function Pill({
   return (
     <div
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium",
+        // v0.2.0: slimmer padding so the header reads as a status bar
+        // not a hero strip. px-3 py-1 -> px-2 py-0.5; text-xs unchanged.
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
         variant === "ready" &&
           "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
         variant === "loading" &&
@@ -241,9 +243,12 @@ function Shell() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-2.5 sm:px-5">
-        <div className="flex min-w-0 items-center gap-2.5">
-          {/* Hamburger — mobile only */}
+      {/* Slimmer header for v0.2.0: drop the redundant 'local-only
+          document assistant' subtitle (it's already the badge in the
+          Library row + footer), reduce vertical padding, shrink the
+          HealthPill via its variant. Saves ~14 px of fixed chrome. */}
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2">
           <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
             <SheetTrigger asChild>
               <Button
@@ -266,13 +271,10 @@ function Shell() {
             </SheetContent>
           </Sheet>
 
-          <span className="text-xl">🤫</span>
-          <h1 className="text-base font-semibold tracking-tight">Hushdoc</h1>
-          <span className="hidden truncate text-xs text-muted-foreground sm:inline">
-            local-only document assistant
-          </span>
+          <span className="text-lg leading-none">🤫</span>
+          <h1 className="text-[15px] font-semibold tracking-tight">Hushdoc</h1>
         </div>
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        <div className="flex shrink-0 items-center gap-1.5">
           <HealthPill />
           <Button
             type="button"

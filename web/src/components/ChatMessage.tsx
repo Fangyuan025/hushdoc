@@ -1,4 +1,13 @@
-import { Loader2, User, Sparkles, Volume2 } from "lucide-react"
+import { useState } from "react"
+import {
+  Check,
+  Copy,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  User,
+  Volume2,
+} from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
@@ -33,11 +42,28 @@ interface ChatMessageProps {
   /** Optional handler for the 🔊 replay icon next to the assistant
    *  bubble. Receives the cached blob URL to re-play. */
   onReplay?: (audioUrl: string) => void
+  /** v0.2.0: regenerate this answer (re-run the same standalone query
+   *  from the user message that produced it). Falsy = button hidden. */
+  onRegenerate?: () => void
 }
 
 /** One chat bubble. Assistant supports markdown + code + GFM tables. */
-export function ChatMessage({ msg, onReplay }: ChatMessageProps) {
+export function ChatMessage({ msg, onReplay, onRegenerate }: ChatMessageProps) {
   const isUser = msg.role === "user"
+  const [copied, setCopied] = useState(false)
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(msg.content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      /* clipboard might be blocked in some embeds; silently no-op */
+    }
+  }
+
+  const showActionsRow =
+    !isUser && !msg.streaming && msg.content && msg.content.length > 0
 
   return (
     <div className={cn("flex gap-3", isUser && "justify-end")}>
@@ -50,9 +76,6 @@ export function ChatMessage({ msg, onReplay }: ChatMessageProps) {
         <div
           className={cn(
             "text-[15px] leading-relaxed",
-            // User messages get a chat bubble; assistant messages render
-            // inline (ChatGPT-style) so prose, code blocks, and tables
-            // can breathe edge-to-edge.
             isUser
               ? "rounded-2xl bg-primary px-4 py-2.5 text-primary-foreground"
               : "py-0.5",
@@ -78,25 +101,49 @@ export function ChatMessage({ msg, onReplay }: ChatMessageProps) {
           )}
         </div>
 
-        {!isUser && (msg.audioUrl || (msg.sources && msg.sources.length > 0)) && (
-          <div className="mt-1 flex items-center justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              {!msg.chitchat && msg.sources && msg.sources.length > 0 && (
-                <Sources
-                  docs={msg.sources}
-                  standaloneQuery={msg.standaloneQuery}
-                />
+        {/* Sources / trace row (skip chitchat — no docs anyway). */}
+        {!isUser && !msg.chitchat && (
+          (msg.sources && msg.sources.length > 0) ||
+          (msg.retrievalTrace && msg.retrievalTrace.length > 0)
+        ) && (
+          <Sources
+            docs={msg.sources || []}
+            standaloneQuery={msg.standaloneQuery}
+            trace={msg.retrievalTrace}
+            mode={msg.retrievalMode}
+          />
+        )}
+
+        {/* v0.2.0 action row: regenerate / copy / replay-audio. Only
+            renders on completed assistant messages so the streaming
+            bubble doesn't flicker. */}
+        {showActionsRow && (
+          <div className="mt-1 flex items-center gap-0.5 text-muted-foreground">
+            {onRegenerate && (
+              <ActionBtn
+                title="Regenerate answer"
+                onClick={onRegenerate}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </ActionBtn>
+            )}
+            <ActionBtn
+              title={copied ? "Copied!" : "Copy answer"}
+              onClick={onCopy}
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
               )}
-            </div>
-            {msg.audioUrl && onReplay && !msg.streaming && (
-              <button
-                type="button"
-                onClick={() => onReplay(msg.audioUrl!)}
-                className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            </ActionBtn>
+            {msg.audioUrl && onReplay && (
+              <ActionBtn
                 title="Replay audio"
+                onClick={() => onReplay(msg.audioUrl!)}
               >
                 <Volume2 className="h-3.5 w-3.5" />
-              </button>
+              </ActionBtn>
             )}
           </div>
         )}
@@ -107,5 +154,26 @@ export function ChatMessage({ msg, onReplay }: ChatMessageProps) {
         </div>
       )}
     </div>
+  )
+}
+
+function ActionBtn({
+  title,
+  onClick,
+  children,
+}: {
+  title: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="rounded-md p-1 transition-colors hover:bg-accent hover:text-foreground"
+    >
+      {children}
+    </button>
   )
 }

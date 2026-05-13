@@ -293,9 +293,9 @@ class LocalVectorStore:
         search_kwargs.update(kwargs.pop("search_kwargs", {}))
         return self._store.as_retriever(search_kwargs=search_kwargs, **kwargs)
 
-    def list_filenames(self) -> List[str]:
-        """All distinct `filename` values currently in the collection.
-        Useful for the UI's 'search scope' selector."""
+    def _all_metadatas(self) -> List[dict]:
+        """Internal: pull every chunk's metadata in one call. Used by both
+        list_filenames (legacy) and list_files_with_meta (v0.2.0 UI)."""
         def _get():
             return self._store._collection.get(include=["metadatas"])  # noqa: SLF001
         try:
@@ -306,13 +306,96 @@ class LocalVectorStore:
                 try:
                     data = _get()
                 except Exception:
-                    logger.exception("Failed to enumerate filenames after refresh.")
+                    logger.exception("Failed to enumerate metadatas after refresh.")
                     return []
             else:
-                logger.exception("Failed to enumerate filenames.")
+                logger.exception("Failed to enumerate metadatas.")
                 return []
-        names = {(m or {}).get("filename") for m in data.get("metadatas", [])}
+        return [m or {} for m in data.get("metadatas", [])]
+
+    def list_filenames(self) -> List[str]:
+        """All distinct `filename` values currently in the collection.
+        Useful for the UI's 'search scope' selector."""
+        names = {m.get("filename") for m in self._all_metadatas()}
         return sorted(n for n in names if n)
+
+    def list_files_with_meta(self) -> List[dict]:
+        """Aggregate per-file metadata from individual chunk metadatas:
+        chunk_count, file_size (bytes), added_at (epoch seconds, MIN
+        across chunks -- the moment the file first appeared in the
+        index), source_kind (uploaded / typed / folder / unknown).
+
+        Returns a list sorted by added_at descending (newest first) so
+        the Library panel shows recent uploads at the top. Files that
+        existed before the v0.2.0 metadata fields rolled out fall
+        through with sensible defaults (added_at=0, file_size=0,
+        source_kind='unknown')."""
+        agg: dict[str, dict] = {}
+        for m in self._all_metadatas():
+            fn = m.get("filename")
+            if not fn:
+                continue
+            row = agg.setdefault(fn, {
+                "filename": fn,
+                "chunk_count": 0,
+                "file_size": 0,
+                "added_at": 0.0,
+                "source_kind": "unknown",
+            })
+            row["chunk_count"] += 1
+            # added_at / file_size / source_kind should be identical across
+            # every chunk of one file. Use first non-default we see; pick
+            # MIN added_at to be defensive against re-ingest bumping it.
+            added = m.get("added_at")
+            if isinstance(added, (int, float)) and added > 0:
+                row["added_at"] = (
+                    min(row["added_at"], float(added))
+                    if row["added_at"] > 0 else float(added)
+                )
+            size = m.get("file_size")
+            if isinstance(size, (int, float)) and size > 0:
+                row["file_size"] = int(size)
+            kind = m.get("source_kind")
+            if isinstance(kind, str) and kind:
+                row["source_kind"] = kind
+        return sorted(agg.values(), key=lambda r: -r["added_at"])
+
+    def delete_by_filename(self, filename: str) -> int:
+        """Drop every chunk whose metadata.filename == filename. Returns
+        the number of chunks removed (best-effort; -1 on failure)."""
+        if not filename:
+            return 0
+        try:
+            # Chroma's delete-by-where: passes metadata filter directly.
+            # We have to count first because delete() doesn't report n.
+            before = self._all_metadatas()
+            target_ids = []
+            data = self._store._collection.get(  # noqa: SLF001
+                where={"filename": filename},
+                include=[],
+            )
+            target_ids = data.get("ids", []) or []
+            if not target_ids:
+                return 0
+            self._store._collection.delete(ids=target_ids)  # noqa: SLF001
+            logger.info("Deleted %d chunks for %s.", len(target_ids), filename)
+            return len(target_ids)
+        except Exception as exc:
+            if any(h in str(exc).lower() for h in self._TRANSIENT_HINTS):
+                self._refresh_store()
+                try:
+                    data = self._store._collection.get(  # noqa: SLF001
+                        where={"filename": filename}, include=[],
+                    )
+                    ids = data.get("ids", []) or []
+                    if ids:
+                        self._store._collection.delete(ids=ids)  # noqa: SLF001
+                    return len(ids)
+                except Exception:
+                    logger.exception("delete_by_filename retry failed.")
+                    return -1
+            logger.exception("delete_by_filename failed for %s.", filename)
+            return -1
 
     def similarity_search_balanced(
         self,

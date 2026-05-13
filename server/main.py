@@ -43,7 +43,10 @@ from server.schemas import (
     ConversationsListResponse,
     CreateConversationRequest,
     DeleteDocumentsResponse,
+    DeleteOneFileResponse,
     DocumentsResponse,
+    FileMeta,
+    PasteTextRequest,
     HealthResponse,
     RenameConversationRequest,
     VoiceHealthResponse,
@@ -130,10 +133,12 @@ def health() -> HealthResponse:
 @app.get("/api/documents", response_model=DocumentsResponse)
 def list_documents() -> DocumentsResponse:
     store = deps.get_store()
+    files = [FileMeta(**row) for row in store.list_files_with_meta()]
     return DocumentsResponse(
-        filenames=store.list_filenames(),
+        filenames=[f.filename for f in files] or store.list_filenames(),
         chunk_count=store.count(),
         summaries=doc_summaries.all_summaries(),
+        files=files,
     )
 
 
@@ -148,6 +153,37 @@ def delete_documents() -> DeleteDocumentsResponse:
     return DeleteDocumentsResponse(ok=True, was_count=was)
 
 
+@app.delete("/api/documents/{filename}", response_model=DeleteOneFileResponse)
+def delete_one_document(filename: str) -> DeleteOneFileResponse:
+    """Remove a single file (every chunk whose metadata.filename matches)
+    + its cached summary. v0.2.0 -- replaces the all-or-nothing wipe for
+    the common case of 'I'm done with this one document'."""
+    store = deps.get_store()
+    n = store.delete_by_filename(filename)
+    if n < 0:
+        raise HTTPException(status_code=500, detail="Delete failed.")
+    if n == 0:
+        # Not really an error -- might be a typed/pasted item with no
+        # disk copy to clean up, or an idempotent re-delete.
+        logger.info("Delete for %r found 0 chunks (already gone?).", filename)
+    try:
+        doc_summaries.remove_summary(filename)
+    except Exception:
+        # Best-effort: the chain scopes summaries by current filenames at
+        # query time, so a leftover summary won't break anything.
+        logger.debug("Couldn't remove summary for %s.", filename, exc_info=True)
+
+    # Also remove the saved upload file from disk if we put it there.
+    try:
+        candidate = UPLOAD_DIR / filename
+        if candidate.is_file():
+            candidate.unlink()
+    except Exception:
+        logger.debug("Couldn't remove upload file %s.", filename, exc_info=True)
+
+    return DeleteOneFileResponse(ok=True, removed_chunks=n)
+
+
 # ---------------------------------------------------------------------------
 # Document upload (multipart + per-file SSE progress)
 # ---------------------------------------------------------------------------
@@ -155,12 +191,38 @@ UPLOAD_DIR = Path("./data/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _stamp_file_metadata(
+    documents,
+    *,
+    file_size: int,
+    source_kind: str,
+) -> None:
+    """Decorate every chunk's metadata with the per-file fields the
+    Library panel reads (added_at / file_size / source_kind). Mutates in
+    place. ``added_at`` is recorded at ingest time, not file mtime, so
+    re-uploading the same file moves it back to the top of the list.
+
+    Kept as a free function so both file uploads and pasted-text ingest
+    can share it."""
+    now = time.time()
+    for d in documents:
+        # Don't overwrite existing values if the caller already set them.
+        d.metadata.setdefault("added_at", now)
+        d.metadata.setdefault("file_size", file_size)
+        d.metadata.setdefault("source_kind", source_kind)
+
+
 async def _ingest_files_streaming(
     paths: list[Path],
+    source_kind: str = "uploaded",
 ) -> AsyncIterator[tuple[str, dict]]:
     """Per-file ingest, yielding ('file_done', {...}) after each, then
     a final ('all_done', {...}). Heavy work runs in a thread so the
-    event loop stays responsive."""
+    event loop stays responsive.
+
+    ``source_kind`` lets the upload endpoint mark whether the file came
+    from a single drag-drop ('uploaded') or a bulk folder pick
+    ('folder'). The frontend's Library row uses this to badge the row."""
     chain = deps.get_chain()
     ingestor = deps.get_ingestor()
     store = deps.get_store()
@@ -170,6 +232,13 @@ async def _ingest_files_streaming(
 
     def _ingest_one(p: Path) -> dict:
         result = ingestor.ingest(p)
+        try:
+            file_size = p.stat().st_size
+        except Exception:
+            file_size = 0
+        _stamp_file_metadata(
+            result.documents, file_size=file_size, source_kind=source_kind,
+        )
         store.add_documents(result.documents)
         full_text = result.markdown or "\n\n".join(
             d.page_content for d in result.documents
@@ -225,10 +294,66 @@ async def upload_documents(
             shutil.copyfileobj(f.file, out)
         paths.append(dest)
 
+    # The folder vs single-file distinction comes from the multipart
+    # request itself (multiple paths from one webkitdirectory pick vs
+    # one-or-more from the drag-drop zone). The frontend signals which
+    # via the `source_kind` form field; default to 'uploaded'.
     return EventSourceResponse(
         events_to_sse(_ingest_files_streaming(paths)),
         media_type="text/event-stream",
     )
+
+
+@app.post("/api/documents/paste")
+async def paste_document(req: PasteTextRequest):
+    """Ingest raw pasted text (no disk copy). The Library shows the
+    item with source_kind='typed' so the user can tell it apart from
+    uploaded files. Filename is either user-supplied or auto-derived
+    from the first non-empty line."""
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty text")
+
+    # Derive a friendly filename from the first non-empty / non-heading
+    # line of the paste, capped at 60 chars. Falls back to a timestamp.
+    def _derive_filename() -> str:
+        for line in text.splitlines():
+            cleaned = line.strip().lstrip("#").strip()
+            if cleaned:
+                # Strip characters that would be awkward in URLs / sidebars.
+                safe = "".join(
+                    c if (c.isalnum() or c in " -_.") else " "
+                    for c in cleaned
+                ).strip()
+                safe = " ".join(safe.split())[:60]
+                if safe:
+                    return f"{safe}.md"
+        from datetime import datetime
+        return f"pasted-{datetime.now():%Y%m%d-%H%M%S}.md"
+
+    filename = (req.filename or "").strip() or _derive_filename()
+
+    ingestor = deps.get_ingestor()
+    chain = deps.get_chain()
+    store = deps.get_store()
+
+    def _run() -> dict:
+        result = ingestor.ingest_text(text, filename=filename)
+        _stamp_file_metadata(
+            result.documents,
+            file_size=len(text.encode("utf-8")),
+            source_kind="typed",
+        )
+        store.add_documents(result.documents)
+        summary = chain.summarize_document(filename, text) or ""
+        return {"filename": filename, "chunks": result.chunk_count, "summary": summary}
+
+    try:
+        payload = await asyncio.to_thread(_run)
+    except Exception as exc:
+        logger.exception("Paste-text ingest failed.")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return payload
 
 
 # ---------------------------------------------------------------------------

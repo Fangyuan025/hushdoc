@@ -27,15 +27,42 @@ class HealthResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Documents
 # ---------------------------------------------------------------------------
+class FileMeta(BaseModel):
+    """Per-file metadata aggregated from the vector store. Added in v0.2.0
+    to power the unified Library panel (size, added_at, source_kind shown
+    in the row, hover-trash for per-file delete)."""
+    filename: str
+    chunk_count: int
+    file_size: int = 0       # bytes; 0 if pre-v0.2.0 chunk or pasted text
+    added_at: float = 0.0    # epoch seconds; 0 if pre-v0.2.0 chunk
+    source_kind: str = "unknown"  # uploaded / folder / typed / unknown
+
+
 class DocumentsResponse(BaseModel):
     filenames: List[str]
     chunk_count: int
     summaries: Dict[str, str]
+    files: List[FileMeta] = []  # v0.2.0+ rich metadata; clients can ignore
 
 
 class DeleteDocumentsResponse(BaseModel):
     ok: bool
     was_count: int
+
+
+class DeleteOneFileResponse(BaseModel):
+    """Response for DELETE /api/documents/{filename}."""
+    ok: bool
+    removed_chunks: int
+
+
+class PasteTextRequest(BaseModel):
+    """Payload for POST /api/documents/paste."""
+    text: str
+    # Optional display name. If omitted the server derives one from the
+    # first non-empty line of the pasted content, falling back to a
+    # timestamped 'pasted-YYYYmmdd-HHMMSS.md' name.
+    filename: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
