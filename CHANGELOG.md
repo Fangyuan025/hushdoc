@@ -4,6 +4,73 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.3.0] — 2026-05-13
+
+User-tunable Settings page. Two persisted options, two surfaces, one
+shared file.
+
+### Added — Settings modal (gear icon in header)
+- **Custom model path.** Type any GGUF path, hit *Save*, and the
+  backend stops the running `llama-server.exe` + starts a fresh one
+  against the new model + rebuilds the RAG chain — all before the PUT
+  returns, so the toast "Model swapped" actually means it's loaded
+  and your next chat hits the new weights. Validated up front: the
+  PUT 400s if the path doesn't exist or isn't `.gguf`, and the
+  persisted config never gets touched on rejection.
+- **Auto-cleanup on exit.** When checked, the launcher
+  (`hushdoc.ps1`) skips its three per-category "Delete X?" prompts on
+  exit and just wipes `chat_history/` + `data/uploads/` + `chroma_db/`
+  silently, then closes the terminal window with no final pause.
+  Unchecked (default) keeps the v0.2.x prompt behavior.
+- Path-validity pip in the modal — green check if the GGUF file is
+  present, red triangle if it's gone, refreshed every time the modal
+  opens.
+
+### Added — backend
+- New module `server/config.py` — atomic JSON read/write of
+  `./hushdoc_config.json` (tempfile + `os.replace`). Defaults fill
+  in for any missing key so the file can be hand-edited without
+  breaking the schema; unknown keys are preserved on read, stripped
+  on write.
+- New endpoints:
+  - `GET /api/config` — current settings + a `model_path_valid` hint.
+  - `PUT /api/config` — partial update; only the keys you send get
+    changed. Triggers `deps.reload_chain_with_model()` if model_path
+    moved.
+- `deps.reload_chain_with_model(path)` — kills the existing
+  llama-server subprocess (drops the `_SHARED` singleton), nulls the
+  cached `_chain`, sets the new path explicitly via `LLMConfig(...)`
+  on rebuild (env var alone wouldn't work because the dataclass
+  default was frozen at module import), and pre-warms by calling
+  `get_chain()` so the user's next message doesn't pay cold-start.
+- `deps._load_persisted_model_path()` — `@app.on_event("startup")`
+  reads the saved config and primes the chain to use the user's
+  preferred model from the very first request.
+
+### Added — launcher
+- `hushdoc.ps1` cleanup phase now reads `hushdoc_config.json` and
+  branches:
+  - `auto_cleanup_on_exit: true` → silent wipe of all three dirs,
+    then close immediately (no `Start-Sleep`).
+  - default → existing per-category `[y/N]` prompts; help text
+    mentions the toggle so users learn it exists.
+
+### Build / housekeeping
+- `hushdoc_config.json` added to `.gitignore` — user-specific, never
+  committed.
+- TS check + production build pass clean. 19 backend routes registered.
+
+### Test trace
+- `PUT /api/config` with same model_path: chain reload + new
+  llama-server up + post-reload chat streams 25 tokens. ~6 s
+  round-trip on Qwen3-1.7B.
+- `PUT /api/config` with bogus path: HTTP 400, config file untouched,
+  running llama-server unaffected.
+- `auto_cleanup_on_exit: true` flushed through to JSON file with
+  correct shape.
+
+[0.3.0]: https://github.com/Fangyuan025/hushdoc/releases/tag/v0.3.0
+
 ## [0.2.2] — 2026-05-13
 
 Ingest UX: cancelable + noticeably faster on multi-file batches.

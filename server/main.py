@@ -31,9 +31,12 @@ from fastapi.responses import StreamingResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
 import doc_summaries
+from server import config as app_config
 from server import deps
 from server.conversations import default_store as conv_store
 from server.schemas import (
+    AppConfigResponse,
+    AppConfigUpdateRequest,
     ChatClearRequest,
     ChatClearResponse,
     ChatRequest,
@@ -721,3 +724,99 @@ async def _heartbeat_watchdog() -> None:
 async def _start_watchdog() -> None:
     if _AUTO_SHUTDOWN_ENABLED:
         asyncio.create_task(_heartbeat_watchdog())
+
+
+@app.on_event("startup")
+async def _apply_persisted_config() -> None:
+    """Pull the user's saved model_path out of hushdoc_config.json (if
+    any) and prime deps so the chain's first build uses it. Has to run
+    BEFORE the first chat request, so an on_event handler is the right
+    place. Auto-cleanup setting is read by the launcher, not by this
+    process, so no startup work needed for that one."""
+    deps._load_persisted_model_path()  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Configuration (Settings page)
+# ---------------------------------------------------------------------------
+def _build_config_response() -> AppConfigResponse:
+    cfg = app_config.read_config()
+    raw = cfg.get("model_path", "")
+    valid = False
+    try:
+        p = Path(raw).expanduser().resolve()
+        valid = p.is_file() and p.suffix.lower() == ".gguf"
+    except Exception:
+        valid = False
+    return AppConfigResponse(
+        model_path=raw,
+        auto_cleanup_on_exit=bool(cfg.get("auto_cleanup_on_exit", False)),
+        model_path_valid=valid,
+    )
+
+
+@app.get("/api/config", response_model=AppConfigResponse)
+def get_config() -> AppConfigResponse:
+    return _build_config_response()
+
+
+@app.put("/api/config", response_model=AppConfigResponse)
+async def update_config(req: AppConfigUpdateRequest) -> AppConfigResponse:
+    """Persist the deltas in ``req`` and, if the model path changed,
+    stop+restart llama-server against the new GGUF. Returns the full
+    config snapshot afterwards so the frontend doesn't need a second
+    GET to refresh the form."""
+    updates: dict = {}
+
+    if req.model_path is not None:
+        # Trust-but-verify the path. Empty string -> reset to default.
+        candidate = (req.model_path or "").strip()
+        if not candidate:
+            raise HTTPException(status_code=400, detail="model_path is empty.")
+        p = Path(candidate).expanduser()
+        # Allow relative paths (resolved against repo root via cwd).
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        else:
+            p = p.resolve()
+        if not p.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model file not found: {p}",
+            )
+        if p.suffix.lower() != ".gguf":
+            raise HTTPException(
+                status_code=400,
+                detail="Model file must have a .gguf extension.",
+            )
+        updates["model_path"] = str(p)
+
+    if req.auto_cleanup_on_exit is not None:
+        updates["auto_cleanup_on_exit"] = bool(req.auto_cleanup_on_exit)
+
+    if not updates:
+        # Nothing actually changed; just echo back the current config.
+        return _build_config_response()
+
+    app_config.write_config(updates)
+
+    # Model swap is the only update with side effects beyond the file.
+    if "model_path" in updates:
+        logger.info(
+            "Settings: model_path -> %s; reloading chain.",
+            updates["model_path"],
+        )
+        try:
+            await asyncio.to_thread(
+                deps.reload_chain_with_model, updates["model_path"],
+            )
+        except Exception as exc:
+            # The persisted path is already updated. Surface the load
+            # error to the UI; user can fix the file and retry.
+            logger.exception("Model reload failed for %s", updates["model_path"])
+            raise HTTPException(
+                status_code=500,
+                detail=f"Saved, but failed to load new model: {exc}",
+            )
+
+    return _build_config_response()

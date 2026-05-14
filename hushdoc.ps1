@@ -181,10 +181,35 @@ try {
     Write-Ok "all processes stopped."
 
     # -----------------------------------------------------------------------
-    # 5. Cleanup prompts. Each category is independent and only offered if
-    #    the directory actually exists with content, so a fresh install
-    #    doesn't pester the user.
+    # 5. Cleanup. By default we prompt per category. If the user has
+    #    flipped "Auto-cleanup on exit" in Settings (persisted in
+    #    hushdoc_config.json), we just wipe everything silently and
+    #    let the window close -- no prompts.
     # -----------------------------------------------------------------------
+    $autoCleanup = $false
+    try {
+        $cfgFile = Join-Path $root "hushdoc_config.json"
+        if (Test-Path $cfgFile) {
+            $cfg = Get-Content $cfgFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($cfg.auto_cleanup_on_exit) { $autoCleanup = $true }
+        }
+    } catch {
+        # Corrupt / unreadable config -> default to safe prompt behavior.
+    }
+
+    function Wipe-Path($label, $path) {
+        if (-not (Test-Path $path)) { return }
+        $items = Get-ChildItem -LiteralPath $path -Force `
+            -ErrorAction SilentlyContinue
+        if (-not $items -or $items.Count -eq 0) { return }
+        try {
+            $items | Remove-Item -Recurse -Force -ErrorAction Stop
+            Write-Ok "$label cleared."
+        } catch {
+            Write-Warn "could not fully clear $label : $($_.Exception.Message)"
+        }
+    }
+
     function Confirm-Cleanup($label, $path) {
         if (-not (Test-Path $path)) { return }
         $items = Get-ChildItem -LiteralPath $path -Force `
@@ -193,30 +218,39 @@ try {
         Write-Host ""
         $ans = Read-Host "Delete $label ($path, $($items.Count) item(s))? [y/N]"
         if ($ans -match '^(y|yes)$') {
-            try {
-                Get-ChildItem -LiteralPath $path -Force `
-                    -ErrorAction SilentlyContinue |
-                    Remove-Item -Recurse -Force -ErrorAction Stop
-                Write-Ok "$label cleared."
-            } catch {
-                Write-Warn "could not fully clear $label : $($_.Exception.Message)"
-            }
+            Wipe-Path $label $path
         }
     }
 
-    Write-Host ""
-    Write-Host "============================================================" -ForegroundColor DarkGray
-    Write-Host "  Optional cleanup -- answer y to wipe, anything else keeps."  -ForegroundColor White
-    Write-Host "============================================================" -ForegroundColor DarkGray
+    $convPath = Join-Path $root "chat_history"
+    $upPath   = Join-Path $root "data\uploads"
+    $chPath   = Join-Path $root "chroma_db"
 
-    Confirm-Cleanup "conversations"     (Join-Path $root "chat_history")
-    Confirm-Cleanup "uploaded documents"(Join-Path $root "data\uploads")
-    Confirm-Cleanup "vector index + summary cache" `
-                                        (Join-Path $root "chroma_db")
+    if ($autoCleanup) {
+        Write-Host ""
+        Write-Step "Auto-cleanup is on (Settings) -- wiping local data without prompts."
+        Wipe-Path "conversations"            $convPath
+        Wipe-Path "uploaded documents"       $upPath
+        Wipe-Path "vector index + summary cache" $chPath
+    } else {
+        Write-Host ""
+        Write-Host "  --[ cleanup ]------------------------------------" -ForegroundColor DarkGray
+        Write-Host "    answer y to wipe, anything else keeps" -ForegroundColor Gray
+        Write-Host "    (toggle 'Auto-cleanup on exit' in Settings to skip)" -ForegroundColor DarkGray
+        Write-Host "  -------------------------------------------------" -ForegroundColor DarkGray
+
+        Confirm-Cleanup "conversations"            $convPath
+        Confirm-Cleanup "uploaded documents"       $upPath
+        Confirm-Cleanup "vector index + summary cache" $chPath
+    }
 
     Write-Host ""
     Write-Ok "goodbye."
-    # Pause briefly so the user can read the final messages when launched
-    # from a double-click (the window auto-closes otherwise).
-    Start-Sleep -Seconds 1
+    # Auto-cleanup users want the window gone the second cleanup is
+    # done -- no "press a key" gate, no final pause. For the prompt
+    # path we wait briefly so users launched via double-click can
+    # actually read the final messages before the window auto-closes.
+    if (-not $autoCleanup) {
+        Start-Sleep -Seconds 1
+    }
 }

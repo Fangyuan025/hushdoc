@@ -35,6 +35,9 @@ web/*.log
 /*.err
 .claude/
 
+# v0.3.0 user settings (Settings page persists here; never goes in git)
+hushdoc_config.json
+
 # Eval + dev-only tests + test fixtures: kept locally for the maintainer,
 # not shipped to users (they don't need ragas / datasets / pyarrow for
 # the chat path, and the smoke / integration tests aren't part of the UX).

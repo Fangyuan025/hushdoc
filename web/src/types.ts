@@ -17,6 +17,15 @@ export interface HealthResponse {
   indexed_files: string[]
 }
 
+/** v0.3.0 Settings page. Mirrors server/schemas.AppConfigResponse. */
+export interface AppConfig {
+  model_path: string
+  auto_cleanup_on_exit: boolean
+  /** Server-side check: does model_path point at an actual .gguf? Saves the
+   *  frontend from doing FS work; if false, we render a red status pip. */
+  model_path_valid: boolean
+}
+
 export interface FileMeta {
   filename: string
   chunk_count: number

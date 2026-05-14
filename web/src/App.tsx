@@ -9,6 +9,7 @@ import {
   Loader2,
   Menu,
   Moon,
+  Settings as SettingsIcon,
   ShieldCheck,
   Sun,
 } from "lucide-react"
@@ -16,6 +17,7 @@ import { Toaster } from "sonner"
 
 import { ChatPane, type ChatPaneHandle } from "@/components/ChatPane"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
+import { SettingsModal } from "@/components/Settings"
 import { Sidebar, SidebarContent } from "@/components/Sidebar"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
@@ -175,6 +177,9 @@ function Shell() {
   const chatRef = useRef<ChatPaneHandle>(null)
   const voice = useVoice()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Settings modal — opened from the header gear, dismissed via Esc /
+  // backdrop click / Close button.
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Active conversation id, persisted per-tab. null = empty / new-chat
   // state where typing the first message will auto-create a conv.
@@ -281,6 +286,15 @@ function Shell() {
             type="button"
             variant="ghost"
             size="icon-sm"
+            onClick={() => setSettingsOpen(true)}
+            title="Settings"
+          >
+            <SettingsIcon className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={() => setDark((d) => !d)}
             title={dark ? "Switch to light" : "Switch to dark"}
           >
@@ -288,6 +302,8 @@ function Shell() {
           </Button>
         </div>
       </header>
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
       <main className="flex min-h-0 flex-1">
         <Sidebar

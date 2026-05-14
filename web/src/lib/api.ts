@@ -11,6 +11,7 @@
  */
 
 import type {
+  AppConfig,
   DocumentsResponse,
   HealthResponse,
 } from "@/types"
@@ -62,6 +63,18 @@ export const apiPasteText = (text: string, filename?: string) =>
     "/documents/paste",
     { text, filename: filename ?? null },
   )
+
+// ---------------------------------------------------------------------------
+// Settings (v0.3.0)
+// ---------------------------------------------------------------------------
+export const apiGetConfig = () => jsonGet<AppConfig>("/config")
+
+/** PATCH-style save: only send the fields that changed. Server returns the
+ *  refreshed full config. A model-path change triggers a backend chain
+ *  reload before returning (so success here means the new model is ready). */
+export const apiSaveConfig = (
+  updates: Partial<Pick<AppConfig, "model_path" | "auto_cleanup_on_exit">>,
+) => jsonSend<AppConfig>("/config", updates, "PUT")
 
 // ---------------------------------------------------------------------------
 // Chat

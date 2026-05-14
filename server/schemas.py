@@ -56,6 +56,23 @@ class DeleteOneFileResponse(BaseModel):
     removed_chunks: int
 
 
+class AppConfigResponse(BaseModel):
+    """Surfaced to the UI's Settings page. The path validity flag is a
+    derived hint so the user gets a red dot for 'file's gone' without
+    the frontend having to do filesystem checks."""
+    model_path: str
+    auto_cleanup_on_exit: bool
+    model_path_valid: bool = False
+
+
+class AppConfigUpdateRequest(BaseModel):
+    """PUT /api/config body. All fields optional -- the frontend sends
+    only what changed so a partial save can't accidentally clobber an
+    unrelated setting."""
+    model_path: Optional[str] = None
+    auto_cleanup_on_exit: Optional[bool] = None
+
+
 class PasteTextRequest(BaseModel):
     """Payload for POST /api/documents/paste."""
     text: str
