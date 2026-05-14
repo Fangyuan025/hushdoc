@@ -14,6 +14,9 @@ setlocal
 set "ROOT=%~dp0"
 pushd "%ROOT%"
 
+REM Switch cmd's codepage to UTF-8 so the banner's 🤫 emoji renders.
+chcp 65001 >nul 2>&1
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%setup.ps1" %*
 set "EC=%ERRORLEVEL%"
 

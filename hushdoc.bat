@@ -13,6 +13,10 @@ setlocal
 set "ROOT=%~dp0"
 pushd "%ROOT%"
 
+REM Switch cmd's codepage to UTF-8 so the banner's 🤫 emoji renders
+REM correctly. Suppressed output keeps the terminal tidy.
+chcp 65001 >nul 2>&1
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%hushdoc.ps1" %*
 set "EC=%ERRORLEVEL%"
 

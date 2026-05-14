@@ -5,6 +5,34 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
+# Slant-figlet "HUSHDOC" + 🤫 tagline. Same banner used by hushdoc.ps1
+# / setup.ps1 so every entry point shares one identity card.
+show_banner() {
+    local tagline="${1:-dev launcher -- backend + Vite}"
+    local version="dev"
+    if [[ -f "$ROOT/VERSION" ]]; then
+        version="$(tr -d '[:space:]' <"$ROOT/VERSION")"
+    fi
+    # Only paint colors if we're on a TTY; piped output stays clean.
+    local C_CYAN='' C_DIM='' C_RESET=''
+    if [[ -t 1 ]]; then
+        C_CYAN=$'\033[36m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'
+    fi
+    echo
+    echo "${C_CYAN}    __  __           __         __          ${C_RESET}"
+    echo "${C_CYAN}   / / / /_  _______/ /_  ____/ /___  _____ ${C_RESET}"
+    echo "${C_CYAN}  / /_/ / / / / ___/ __ \\/ __  / __ \\/ ___/ ${C_RESET}"
+    echo "${C_CYAN} / __  / /_/ (__  ) / / / /_/ / /_/ / /__   ${C_RESET}"
+    echo "${C_CYAN}/_/ /_/\\__,_/____/_/ /_/\\__,_/\\____/\\___/   ${C_RESET}"
+    echo
+    printf '       \xf0\x9f\xa4\xab  %s\n' "$tagline"
+    printf '%s          local-only - offline - your machine - v%s%s\n' \
+        "$C_DIM" "$version" "$C_RESET"
+    echo
+}
+
+show_banner "dev launcher -- backend + Vite (no auto-cleanup)"
+
 # Pick a Python: prefer the project venv, fall back to system python.
 if [[ -x "$ROOT/.venv/bin/python" ]]; then
     PY="$ROOT/.venv/bin/python"

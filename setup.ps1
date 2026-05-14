@@ -31,6 +31,12 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $root
 
+# Force UTF-8 on the console BEFORE any banner / emoji write -- PS 5.1's
+# default cp1252 turns 🤫 into a literal "?". Has to happen up here, not
+# inside the banner function, otherwise the first lines render garbled.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # PowerShell 5.1's progress UI is so expensive to render that it dominates
 # wall-clock time on multi-hundred-MB downloads via Invoke-WebRequest --
 # observed to slow a 1 GB download by ~100x. Suppress it globally; we use
@@ -100,14 +106,33 @@ function Get-FileWithProgress {
 }
 
 # ===========================================================================
-# Banner
+# Banner — same slant ASCII used by hushdoc.ps1 / dev.* so every entry
+# point has the same identity card. 🤫 emoji via ConvertFromUtf32 to dodge
+# the PS 5.1 file-encoding trap.
 # ===========================================================================
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor DarkGray
-Write-Host "  Hushdoc setup"                                              -ForegroundColor White
-Write-Host "  This is a one-time install. Re-running is safe."            -ForegroundColor White
-Write-Host "============================================================" -ForegroundColor DarkGray
-Write-Host ""
+function Show-HushdocBanner {
+    param([string]$Tagline)
+    $emoji = [char]::ConvertFromUtf32(0x1F92B)  # 🤫 shushing face
+    $version = "dev"
+    try {
+        $vfile = Join-Path $root "VERSION"
+        if (Test-Path $vfile) {
+            $version = (Get-Content $vfile -Raw -Encoding UTF8).Trim()
+        }
+    } catch { }
+    Write-Host ""
+    Write-Host "    __  __           __         __          " -ForegroundColor Cyan
+    Write-Host "   / / / /_  _______/ /_  ____/ /___  _____ " -ForegroundColor Cyan
+    Write-Host "  / /_/ / / / / ___/ __ \/ __  / __ \/ ___/ " -ForegroundColor Cyan
+    Write-Host " / __  / /_/ (__  ) / / / /_/ / /_/ / /__   " -ForegroundColor Cyan
+    Write-Host "/_/ /_/\__,_/____/_/ /_/\__,_/\____/\___/   " -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "       $emoji  $Tagline" -ForegroundColor White
+    Write-Host "          local-only - offline - your machine - v$version" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+Show-HushdocBanner -Tagline "setup -- one-time, re-running is safe"
 
 # ===========================================================================
 # 1. Python venv + pip install
@@ -326,14 +351,13 @@ Write-Host ""
 # ===========================================================================
 # Done.
 # ===========================================================================
-Write-Host "============================================================" -ForegroundColor DarkGray
+Write-Host "  --[ done ]---------------------------------------" -ForegroundColor DarkGray
 Write-Ok    "Setup complete!"
 Write-Host  ""
-Write-Host  "  Next step: double-click hushdoc.bat to launch the app."
+Write-Host  "    Next step:  double-click hushdoc.bat to launch."
 Write-Host  ""
-Write-Host  "  To swap the model later, replace .\models\model.gguf with"
-Write-Host  "  any other .gguf file from HuggingFace (e.g. a larger Qwen,"
-Write-Host  "  Llama, or Mistral build that fits your RAM)."
-Write-Host  ""
-Write-Host "============================================================" -ForegroundColor DarkGray
+Write-Host  "    Swap models: replace .\models\model.gguf with any"
+Write-Host  "                 .gguf from HuggingFace (Qwen / Llama /"
+Write-Host  "                 Mistral, sized to fit your RAM)."
+Write-Host  "  -------------------------------------------------" -ForegroundColor DarkGray
 Read-Host "Press Enter to close"

@@ -18,9 +18,45 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $root
 
+# Force UTF-8 on the console so the banner's 🤫 emoji renders as a glyph
+# instead of a literal "?" on PowerShell 5.1 / classic conhost. Has to
+# happen BEFORE any Write-Host call that contains a non-ASCII char.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 function Write-Step($msg) { Write-Host "[hushdoc] $msg" -ForegroundColor Cyan }
 function Write-Warn($msg) { Write-Host "[hushdoc] $msg" -ForegroundColor Yellow }
 function Write-Ok($msg)   { Write-Host "[hushdoc] $msg" -ForegroundColor Green }
+
+# Slant-figlet "HUSHDOC" + 🤫 tagline. Same banner used by setup.ps1 /
+# dev.ps1 / dev.sh; keep the art identical across them so the user sees
+# a consistent identity card no matter which entry point they hit.
+function Show-HushdocBanner {
+    param([string]$Tagline = "chat with your documents -- privately")
+    # ConvertFromUtf32 dodges the PS 5.1 file-encoding trap where a raw
+    # UTF-8 emoji byte sequence in a .ps1 saved without BOM gets read
+    # as Windows-1252 and prints as "ð¤«".
+    $emoji = [char]::ConvertFromUtf32(0x1F92B)  # 🤫 shushing face
+    $version = "dev"
+    try {
+        $vfile = Join-Path $root "VERSION"
+        if (Test-Path $vfile) {
+            $version = (Get-Content $vfile -Raw -Encoding UTF8).Trim()
+        }
+    } catch { }
+    Write-Host ""
+    Write-Host "    __  __           __         __          " -ForegroundColor Cyan
+    Write-Host "   / / / /_  _______/ /_  ____/ /___  _____ " -ForegroundColor Cyan
+    Write-Host "  / /_/ / / / / ___/ __ \/ __  / __ \/ ___/ " -ForegroundColor Cyan
+    Write-Host " / __  / /_/ (__  ) / / / /_/ / /_/ / /__   " -ForegroundColor Cyan
+    Write-Host "/_/ /_/\__,_/____/_/ /_/\__,_/\____/\___/   " -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "       $emoji  $Tagline" -ForegroundColor White
+    Write-Host "          local-only - offline - your machine - v$version" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+Show-HushdocBanner
 
 # ---------------------------------------------------------------------------
 # 0. Sanity check the environment.
@@ -94,10 +130,11 @@ if (-not $NoOpen) {
 }
 
 Write-Host ""
-Write-Host "============================================================" -ForegroundColor DarkGray
-Write-Host "  Hushdoc is running." -ForegroundColor White
-Write-Host "  Press Ctrl+C in this window (or just close it) to stop." -ForegroundColor White
-Write-Host "============================================================" -ForegroundColor DarkGray
+Write-Host "  --[ running ]------------------------------------" -ForegroundColor DarkGray
+Write-Host "    backend  http://localhost:8000" -ForegroundColor Gray
+Write-Host "    web      http://localhost:5173" -ForegroundColor Gray
+Write-Host "    stop     Ctrl+C  (or close this window)"      -ForegroundColor Gray
+Write-Host "  -------------------------------------------------" -ForegroundColor DarkGray
 Write-Host ""
 
 # ---------------------------------------------------------------------------
