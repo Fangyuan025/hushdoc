@@ -36,6 +36,12 @@ class FileMeta(BaseModel):
     file_size: int = 0       # bytes; 0 if pre-v0.2.0 chunk or pasted text
     added_at: float = 0.0    # epoch seconds; 0 if pre-v0.2.0 chunk
     source_kind: str = "unknown"  # uploaded / folder / typed / unknown
+    # v0.5.0: whether the citation viewer can open this file. True only
+    # when we kept the raw bytes on disk under ./data/uploads/ AND the
+    # extension is one the viewer renders (currently just .pdf). The UI
+    # uses this to decide whether to wire the citation-chip click to
+    # the viewer or fall back to the snippet card.
+    has_raw: bool = False
 
 
 class DocumentsResponse(BaseModel):

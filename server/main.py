@@ -27,7 +27,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
 import doc_summaries
@@ -141,7 +141,21 @@ def health() -> HealthResponse:
 @app.get("/api/documents", response_model=DocumentsResponse)
 def list_documents() -> DocumentsResponse:
     store = deps.get_store()
-    files = [FileMeta(**row) for row in store.list_files_with_meta()]
+    rows = store.list_files_with_meta()
+    # v0.5.0: stamp has_raw on every row. Cheap stat per file; we run
+    # it here rather than baking it into the chunk metadata so removing
+    # a raw file (or re-uploading one for a previously typed item)
+    # picks up the right answer on the next list call without a reindex.
+    files: list[FileMeta] = []
+    for row in rows:
+        has_raw = False
+        try:
+            candidate = UPLOAD_DIR / Path(row["filename"]).name
+            if candidate.is_file() and candidate.suffix.lower() in RAW_VIEWER_SUFFIXES:
+                has_raw = True
+        except Exception:
+            has_raw = False
+        files.append(FileMeta(**row, has_raw=has_raw))
     return DocumentsResponse(
         filenames=[f.filename for f in files] or store.list_filenames(),
         chunk_count=store.count(),
@@ -382,6 +396,67 @@ def cancel_upload() -> dict:
     _ingest_cancel.set()
     logger.info("Ingest cancel flag set.")
     return {"ok": True}
+
+
+# v0.5.0: extensions whose raw bytes the citation viewer can render.
+# PDFs go through pdf.js on the frontend; everything else surfaces as a
+# 404 from /raw, and the UI falls back to the snippet-only sources card.
+RAW_VIEWER_SUFFIXES = {".pdf"}
+
+
+def _resolve_raw_path(filename: str) -> Path:
+    """Map a stored filename onto its on-disk copy under UPLOAD_DIR,
+    rejecting any input that would escape the upload dir (path-traversal
+    hardening). We use ``Path(...).name`` to peel off any directory
+    components a caller might smuggle in via ``..\\``, then assert the
+    resolved path stays inside ``UPLOAD_DIR``."""
+    if not filename:
+        raise HTTPException(status_code=400, detail="empty filename")
+    base = Path(filename).name
+    if not base or base != filename:
+        # Reject ../ traversal, absolute paths, embedded slashes.
+        raise HTTPException(status_code=400, detail="bad filename")
+    candidate = (UPLOAD_DIR / base).resolve()
+    upload_root = UPLOAD_DIR.resolve()
+    try:
+        candidate.relative_to(upload_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad filename")
+    return candidate
+
+
+@app.get("/api/documents/{filename}/raw")
+def get_document_raw(filename: str):
+    """Return the original uploaded file's bytes so the citation viewer
+    can render it.
+
+    PDFs are what we actually wire into the v0.5.0 viewer (pdf.js
+    renders them with a text layer we can highlight), but the endpoint
+    serves any extension whose raw bytes we kept on disk. Typed / pasted
+    items have no on-disk copy and return 404, as do legacy files that
+    were ingested before this endpoint existed (the user can re-upload
+    to get the viewer back).
+    """
+    path = _resolve_raw_path(filename)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no raw copy on disk")
+    suffix = path.suffix.lower()
+    if suffix not in RAW_VIEWER_SUFFIXES:
+        # We could happily serve anything here, but the citation viewer
+        # only knows what to do with PDFs today. Returning 415 instead
+        # of streaming bytes the UI can't use makes the failure visible
+        # in logs / devtools rather than silently rendering nothing.
+        raise HTTPException(
+            status_code=415,
+            detail=f"raw viewer not supported for {suffix or 'this file'}",
+        )
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        # inline disposition so the browser hands it to our viewer
+        # rather than offering a download.
+        headers={"Content-Disposition": f'inline; filename="{path.name}"'},
+    )
 
 
 @app.post("/api/documents/paste")
