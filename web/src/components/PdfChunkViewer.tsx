@@ -32,6 +32,7 @@ import type {
 } from "pdfjs-dist/types/src/display/api"
 
 import { Button } from "@/components/ui/button"
+import { highlightChunkInTextLayer } from "@/lib/pdf-highlight"
 import { cn } from "@/lib/utils"
 
 // Configure the worker once. The check guards against re-assignment
@@ -224,6 +225,46 @@ export function PdfChunkViewer({
           })
           await tl.render()
         }
+
+        // Highlight the chunk inside the rendered text layer. Done
+        // AFTER the text layer renders so the spans are in the DOM;
+        // if no match is found (different page, aggressive Docling
+        // reflow), the helper silently returns 0 -- the page still
+        // displays normally, just without the highlight overlay.
+        if (chunkText && textLayer) {
+          try {
+            const tagged = highlightChunkInTextLayer(textLayer, chunkText)
+            if (tagged === 0) {
+              // No-op for the user -- but log it so a future
+              // quality-pass can spot which docs hit this path
+              // consistently (likely candidates for a different
+              // chunking strategy).
+              // eslint-disable-next-line no-console
+              console.debug(
+                "[PdfChunkViewer] no fuzzy match for chunk on page",
+                pageNum,
+              )
+            } else {
+              // Scroll the first highlighted span into view so the
+              // user doesn't have to hunt for it on a long page.
+              const first = textLayer.querySelector<HTMLElement>(
+                ".chunkMatch",
+              )
+              if (first) {
+                first.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                  inline: "nearest",
+                })
+              }
+            }
+          } catch (err) {
+            // Highlight failures are non-fatal -- swallow to keep
+            // the viewer usable.
+            // eslint-disable-next-line no-console
+            console.debug("[PdfChunkViewer] highlight failed:", err)
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           const msg = err instanceof Error ? err.message : String(err)
@@ -382,13 +423,6 @@ export function PdfChunkViewer({
                 ref={textLayerRef}
                 className="textLayer absolute inset-0 select-text"
               />
-              {chunkText ? (
-                // Placeholder hook for commit 8 -- once the highlight
-                // overlay lands it'll consume chunkText to paint over
-                // matched text-layer spans. Until then, render nothing
-                // (the snippet still surfaces in the Sources card).
-                <div className="pointer-events-none absolute inset-0" />
-              ) : null}
             </div>
           </div>
         )}
