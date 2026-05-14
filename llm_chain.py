@@ -132,14 +132,19 @@ ANSWER_SYSTEM = (
     "question. If the user writes in Chinese, answer in Chinese; if in "
     "English, answer in English. Do not switch languages mid-answer.\n\n"
     "Follow these rules:\n"
-    "1. Use ONLY the facts contained in the provided context (document "
-    "   summaries + retrieved excerpts). If the answer is not present in "
-    "   the context, reply exactly: 'I don't know based on the provided "
-    "   documents.' (or its Chinese equivalent: '根据提供的文档我无法回答。')\n"
-    "   Do NOT use outside knowledge. Do NOT guess author names, dates, or "
-    "   numbers that are not literally present in the context. If you "
-    "   mention a dataset / model / number / year, it MUST appear verbatim "
-    "   in the context - otherwise omit it.\n"
+    "1. SOURCES OF TRUTH, in priority order:\n"
+    "   (a) the provided context (document summaries + retrieved excerpts)\n"
+    "   (b) prior assistant turns in the chat history -- if you already\n"
+    "       established a fact in this conversation, you may build on it\n"
+    "       in a follow-up answer without re-retrieving.\n"
+    "   Only reply with 'I don't know based on the provided documents.'\n"
+    "   (or '根据提供的文档我无法回答。') when BOTH of those are silent on\n"
+    "   the user's question -- not when the current retrieval happens to\n"
+    "   miss a chunk you previously discussed. Do NOT pull in outside\n"
+    "   world knowledge. Do NOT guess author names, dates, or numbers\n"
+    "   that aren't literally present in (a) or (b). If you mention a\n"
+    "   dataset / model / number / year, it MUST appear verbatim in (a)\n"
+    "   or have been stated in (b) -- otherwise omit it.\n"
     "2. The context block starts with a 'Documents in scope' summary list "
     "   (one line per file describing what that document is about), "
     "   followed by retrieved excerpts each prefixed with "
@@ -167,6 +172,14 @@ ANSWER_PROMPT = ChatPromptTemplate.from_messages(
         MessagesPlaceholder("chat_history"),
         (
             "human",
+            # v0.4.0: when the user's message was a follow-up that
+            # needed pronoun resolution / context expansion, the
+            # rewriter produced a clarified standalone form. Showing
+            # it to the answer model alongside the user's raw text
+            # gives Qwen3-1.7B (and friends) a fighting chance at
+            # the resolution without losing the user's actual wording.
+            # Rendered as "" when the rewrite matches the raw question.
+            "{expanded_query_hint}"
             "Context:\n----------\n{context}\n----------\n\n"
             "Question: {question}\n\n"
             # Last-line language directive. Putting it immediately before
@@ -300,6 +313,50 @@ _CHITCHAT_STRICT_PATTERNS = [
     r"^\s*(请|麻烦)介绍(一?下)?(你?自己)" + _END,
 ]
 _CHITCHAT_STRICT_RE = re.compile("|".join(_CHITCHAT_STRICT_PATTERNS), re.IGNORECASE)
+
+# v0.4.0: pronoun heuristic for follow-up detection. Bare 'why?' is an
+# obvious follow-up via the length gate, but 'Why did they choose
+# mixed methods?' (35 chars) is just as anchored to prior turn — the
+# 'they' is meaningless without it. We trip the boost when EITHER the
+# message is short OR it's medium-length and pronoun-heavy.
+_FOLLOWUP_PRONOUN_RE = re.compile(
+    r"\b(they|them|their|theirs|it|its|this|that|those|these|"
+    r"he|she|him|her|his|hers|"
+    r"why|how|"
+    r"the\s+(authors?|paper|study|document|finding|result))\b",
+    re.IGNORECASE,
+)
+_FOLLOWUP_PRONOUN_CN_RE = re.compile(
+    r"(他们|她们|它们|他|她|它|这|那|为什么|怎么|为何|"
+    r"这篇|那篇|这项|这个|作者|论文|研究)"
+)
+
+
+def is_likely_followup(text: str, has_history: bool) -> bool:
+    """True when this message likely needs context from a previous turn
+    to retrieve well. Three signals, any of which counts:
+
+      1. Very short (< 15 chars) -- bare 'why?' / '继续' / '再说说'.
+      2. Pronoun present (en or zh) AND not too long (< 120 chars).
+         'Why did they choose mixed methods?' qualifies.
+      3. Starts with 'and ' / 'so ' / 'but ' -- discourse markers that
+         continue the previous topic.
+
+    Only meaningful when there IS prior history; otherwise an
+    isolated 'they are weird' isn't a follow-up at all."""
+    if not has_history or not text:
+        return False
+    t = text.strip()
+    if len(t) < 15:
+        return True
+    if len(t) < 120 and (
+        _FOLLOWUP_PRONOUN_RE.search(t)
+        or _FOLLOWUP_PRONOUN_CN_RE.search(t)
+    ):
+        return True
+    if re.match(r"^\s*(and|so|but|also|then|继续|然后|那么|另外)\b", t, re.IGNORECASE):
+        return True
+    return False
 
 
 def is_chitchat(text: str, has_history: bool = False) -> bool:
@@ -592,7 +649,51 @@ class RAGChain:
         self.rerank_multiplier = max(1, rerank_multiplier)
         self._sessions: Dict[str, BaseChatMessageHistory] = {}
 
+        # v0.4.0: per-session rolling window of chunks the chain saw on
+        # the LAST few turns. We mix these into the candidate pool of
+        # every subsequent retrieve call so context from earlier turns
+        # (the methodology section, say) doesn't disappear just because
+        # the new query's bi-encoder score on those chunks is weak. The
+        # cross-encoder rerank that follows is the safety net: irrelevant
+        # carry-over chunks score low and get dropped.
+        from collections import deque  # local import to keep top tidy
+        self._SESSION_CHUNK_MAX = 12
+        self._session_chunks: Dict[str, deque] = {}
+
         self._chain = self._build_chain()
+
+    # --------------------------------------------------- session chunk memory
+    def _recent_session_chunks(self, session_id: str) -> List[Document]:
+        """Return up to SESSION_CHUNK_MAX chunks the chain selected for
+        previous turns in this session. Newest at the end (so the
+        deque's natural order is fine)."""
+        if not session_id:
+            return []
+        return list(self._session_chunks.get(session_id, []))
+
+    def _remember_session_chunks(
+        self, session_id: str, docs: List[Document],
+    ) -> None:
+        """Push the chunks we used on this turn into the session's
+        rolling window. Dedupes against what's already in the deque
+        by (filename, chunk_index) so the same chunk doesn't crowd
+        out variety across multiple turns about the same passage."""
+        if not session_id or not docs:
+            return
+        from collections import deque
+        dq = self._session_chunks.setdefault(
+            session_id, deque(maxlen=self._SESSION_CHUNK_MAX),
+        )
+        seen = {
+            (d.metadata.get("filename"), d.metadata.get("chunk_index"))
+            for d in dq
+        }
+        for d in docs:
+            key = (d.metadata.get("filename"), d.metadata.get("chunk_index"))
+            if key in seen:
+                continue
+            dq.append(d)
+            seen.add(key)
         self._chain_with_history = RunnableWithMessageHistory(
             self._chain,
             self._get_session_history,
@@ -743,14 +844,15 @@ class RAGChain:
             if not query.strip():
                 query = state["question"]
 
-            # Follow-up boost: when the user's actual message is very short
-            # AND chat history has a recent assistant turn, append a snippet
-            # of that turn to the search query. Small models often produce
-            # a weak rewrite for bare 'why?' / '为什么', and similarity
-            # search on those alone returns garbage.
+            # Follow-up boost: when the user's message looks like a
+            # follow-up (short OR pronoun-heavy OR continuation marker),
+            # append a snippet of the previous assistant turn to the
+            # search query. Small models often produce a weak rewrite
+            # for bare 'why?' / '为什么' / 'Why did THEY do that?', and
+            # similarity search on those alone returns garbage.
             original = state.get("question", "")
-            if len(original.strip()) < 15:
-                history = state.get("chat_history") or []
+            history = state.get("chat_history") or []
+            if is_likely_followup(original, bool(history)):
                 last_ai = next(
                     (m for m in reversed(history)
                      if getattr(m, "type", "") == "ai"
@@ -761,7 +863,10 @@ class RAGChain:
                     ai_snippet = (getattr(last_ai, "content", "") or "")[:300]
                     if ai_snippet:
                         query = f"{query} (context: {ai_snippet})"
-                        logger.info("Follow-up boost engaged for short query.")
+                        logger.info(
+                            "Follow-up boost engaged (original=%r, len=%d).",
+                            original[:60], len(original),
+                        )
 
             # Optional per-call scope: list of filenames to restrict
             # retrieval to. Prevents cross-document interference when the
@@ -796,6 +901,47 @@ class RAGChain:
                 )
                 base_mode = "topk"
 
+            # v0.4.0: mix in chunks the chain selected on previous turns of
+            # this session. They're added to the candidate pool BEFORE the
+            # cross-encoder rerank -- so if they're irrelevant to this
+            # query, the reranker drops them; if they ARE relevant
+            # (follow-up about the same passage), they survive even when
+            # bi-encoder similarity on this query would have ranked them
+            # too low to make the top-k. Deduped against fresh candidates
+            # by (filename, chunk_index).
+            session_id = state.get("session_id", "")
+            mode_extra = ""
+            if session_id:
+                recent = self._recent_session_chunks(session_id)
+                if recent:
+                    seen = {
+                        (d.metadata.get("filename"),
+                         d.metadata.get("chunk_index"))
+                        for d in candidates
+                    }
+                    added = 0
+                    for d in recent:
+                        key = (
+                            d.metadata.get("filename"),
+                            d.metadata.get("chunk_index"),
+                        )
+                        if key in seen:
+                            continue
+                        # Also respect the per-call filenames scope: if
+                        # the user just changed scope, don't carry over
+                        # chunks from the previous (different) scope.
+                        if filenames and d.metadata.get("filename") not in filenames:
+                            continue
+                        candidates.append(d)
+                        seen.add(key)
+                        added += 1
+                    if added:
+                        mode_extra = f"+memory({added})"
+                        logger.info(
+                            "Mixed %d recent-turn chunks into candidate pool.",
+                            added,
+                        )
+
             # Cross-encoder rerank: rescores (query, candidate) pairs and
             # keeps the top-k. No-op if reranker load failed or candidates
             # already fit the budget. The 'trace' variant also returns
@@ -805,11 +951,17 @@ class RAGChain:
             if self.use_reranker and len(candidates) > self.k:
                 from reranker import rerank_with_trace
                 docs, trace = rerank_with_trace(query, candidates, top_k=self.k)
-                mode = base_mode + "+rerank"
+                mode = base_mode + "+rerank" + mode_extra
             else:
                 from reranker import rerank_with_trace
                 docs, trace = rerank_with_trace(query, candidates, top_k=self.k)
-                mode = base_mode
+                mode = base_mode + mode_extra
+
+            # Remember the kept chunks for use on the NEXT turn. We track
+            # what the chain actually selected (post-rerank), not the
+            # full candidate set, so the memory stays high-precision.
+            if session_id:
+                self._remember_session_chunks(session_id, docs)
 
             # Tag each trace entry with which retrieval mode produced it
             # (frontend renders this as a small badge above the trace tab).
@@ -841,11 +993,28 @@ class RAGChain:
         self._condense_chain = condense_chain
         self._build_context = _build_context
 
-        # Pipeline: produce {question, chat_history, standalone, context, source_documents}
+        def _compute_expanded_hint(state: dict) -> str:
+            """v0.4.0: when the condense chain produced a meaningfully
+            different standalone form, surface it to the answer model.
+            Empty string when raw == rewrite so the prompt stays clean
+            on direct, pronoun-free questions."""
+            standalone = (state.get("standalone") or "").strip()
+            question = (state.get("question") or "").strip()
+            if standalone and standalone != question:
+                return (
+                    f"(Follow-up note: the user's expanded intent, with "
+                    f"pronouns resolved against prior turns, is: "
+                    f"\"{standalone}\". Their actual message is below.)\n\n"
+                )
+            return ""
+
+        # Pipeline: produce {question, chat_history, standalone, context,
+        # source_documents, expanded_query_hint}
         pipeline = (
             RunnablePassthrough.assign(standalone=condense_chain)
             .assign(source_documents=_retrieve)
             .assign(context=_build_context)
+            .assign(expanded_query_hint=RunnableLambda(_compute_expanded_hint))
         )
 
         answer_chain = (
@@ -1049,11 +1218,13 @@ class RAGChain:
         yield ("standalone", standalone)
 
         # 2. Retrieve. Pass chat_history so the follow-up retrieval boost
-        # can pick up the previous assistant message for short questions.
+        # can pick up the previous assistant message for short questions,
+        # and session_id so _retrieve can mix in chunks from previous turns.
         state = {
             "question": question,
             "standalone": standalone,
             "chat_history": chat_history,
+            "session_id": session_id,
         }
         if filenames:
             state["filenames"] = list(filenames)
@@ -1067,10 +1238,23 @@ class RAGChain:
             if fn and fn not in seen_files:
                 seen_files.append(fn)
         summaries = doc_summaries.get_summaries_for(seen_files)
+        # v0.4.0: surface the rewriter's expanded standalone query to the
+        # answer model when it materially differs from the raw question
+        # (typical for pronoun-anchored follow-ups). Helps Qwen3-1.7B-class
+        # models resolve 'they/it/this' without having to mentally trace
+        # the chat history.
+        expanded_hint = ""
+        if standalone and standalone.strip() != question.strip():
+            expanded_hint = (
+                f"(Follow-up note: the user's expanded intent, with pronouns "
+                f"resolved against prior turns, is: \"{standalone.strip()}\". "
+                f"Their actual message is below.)\n\n"
+            )
         messages = ANSWER_PROMPT.format_messages(
             chat_history=chat_history,
             context=format_documents(docs, summaries=summaries),
             question=question,
+            expanded_query_hint=expanded_hint,
             language_directive=lang_directive,
         )
         full_raw = ""

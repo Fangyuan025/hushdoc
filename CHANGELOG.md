@@ -4,6 +4,107 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.4.0] — 2026-05-13
+
+Multi-turn follow-ups now work. Reported pain point: in a single
+conversation, follow-up questions ("why did they choose X?", "and
+the participants?", bare "why?") frequently hit "I don't know based
+on the provided documents" or lost continuity with earlier turns,
+even when the answer was sitting in chunks the chain had just
+retrieved one turn ago. Root-causing surfaced four architectural
+gaps; all four are fixed in this release.
+
+### Fixed — follow-up detection
+`_retrieve` previously triggered the "append last assistant turn to
+the search query" boost ONLY when `len(question) < 15`. That picked
+up bare "why?" but missed "Why did they choose mixed-methods?" (34
+chars) -- which is just as anchored to prior turn via the unbound
+"they".
+
+Replaced with `is_likely_followup(text, has_history)` covering three
+signals, any of which fires the boost:
+  1. < 15 chars (the old behavior)
+  2. < 120 chars AND contains a pronoun (en: they/them/it/this/those
+     /he/she/why/how + "the {authors,paper,study,document,finding,
+     result}", zh: 他们/她们/它们/他/她/它/这/那/为什么/怎么/为何
+     /这篇/那篇/这项/作者/论文/研究)
+  3. starts with a discourse marker (and/so/but/also/then/继续/然后
+     /那么/另外)
+
+### Fixed — retrieval memory across turns
+The bi-encoder + reranker stack was stateless: each turn rebuilt its
+candidate pool from scratch via similarity_search. If turn 1's
+methodology section was relevant to turn 2's follow-up but the new
+query's vector similarity scored those chunks too low to make the
+top-k, the answer model never saw them again -- so it had to fall
+back to chitchat or IDK.
+
+New: `RAGChain._session_chunks: Dict[str, deque[Document]]` keeps
+a 12-chunk rolling window per session. `_retrieve` mixes them into
+the candidate pool BEFORE the cross-encoder rerank, deduped by
+(filename, chunk_index) and gated by the per-call scope so a user
+who just swapped filename scope doesn't drag chunks from the old
+scope along. The reranker is the safety net: irrelevant carry-over
+chunks score low and get dropped; relevant ones survive the cut.
+
+A new `+memory(N)` suffix on `retrieval_mode` (e.g.
+`topk+rerank+memory(6)`) surfaces this in the Retrieval-trace tab
+so you can see how many chunks crossed over from earlier turns.
+
+### Fixed — IDK threshold was too binary
+`ANSWER_SYSTEM` rule 1 used to say "If the answer is not present in
+the context, reply exactly: 'I don't know based on the provided
+documents.'" Prior assistant turns weren't acknowledged as valid
+context, so any follow-up whose answer required pulling from what
+was just discussed (not from a fresh retrieval) defaulted to IDK.
+
+Rewrote as a tiered hierarchy:
+  (a) document context (primary)
+  (b) prior assistant turns in chat_history (secondary, valid for
+      building on facts already established this conversation)
+
+IDK is reserved for the case where BOTH are silent. Outside-world
+knowledge / guessing remains forbidden.
+
+### Fixed — standalone query was used only for retrieval
+The condense chain happily rewrote "Why did they choose mixed-
+methods?" into "Why did the study choose a mixed-methods approach?"
+but that resolved form was thrown away after retrieval -- the
+answer prompt still received the raw "they"-anchored question.
+Small models (Qwen3-1.7B) often failed to redo the pronoun
+resolution themselves while also juggling the doc context.
+
+Now: when the rewriter produces a meaningfully different standalone
+form, the answer prompt receives a `{expanded_query_hint}` line
+above the user's raw text:
+    "(Follow-up note: the user's expanded intent, with pronouns
+     resolved against prior turns, is: '<standalone>'. Their actual
+     message is below.)"
+Rendered as "" when raw == rewrite so direct questions don't see
+this overhead.
+
+### Verified — 4-turn smoke
+
+Turn 1: "What is this paper about?"
+  -> mode=topk+rerank, 6 cited sources, grounded summary
+Turn 2: "Why did they choose mixed-methods?"
+  -> standalone="Why did the study choose mixed-methods approach?"
+  -> mode=topk+rerank+memory(5)
+  -> grounded answer explaining the qual+quant combo rationale
+Turn 3: "And what were the participants like?"
+  -> standalone="What were the participants like?"
+  -> mode=topk+rerank+memory(7)
+  -> grounded answer with the actual demographic table from the paper
+Turn 4: "why?"
+  -> standalone="Why does the study use a mixed-methods approach?"
+  -> mode=topk+rerank+memory(6)
+  -> grounded answer
+
+Zero IDKs. Pre-v0.4.0 the same trace on the same PDF / same model
+typically hit IDK on turn 2 onward.
+
+[0.4.0]: https://github.com/Fangyuan025/hushdoc/releases/tag/v0.4.0
+
 ## [0.3.0] — 2026-05-13
 
 User-tunable Settings page. Two persisted options, two surfaces, one
