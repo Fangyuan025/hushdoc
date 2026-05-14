@@ -35,6 +35,11 @@ export interface FileMeta {
   added_at: number
   /** uploaded · folder · typed · unknown */
   source_kind: "uploaded" | "folder" | "typed" | "unknown"
+  /** v0.5.0: true iff the citation viewer can open this file. Server
+   *  sets this when the on-disk raw copy under ./data/uploads/ is
+   *  present AND the extension is one the viewer can render
+   *  (currently just .pdf). */
+  has_raw?: boolean
 }
 
 export interface DocumentsResponse {

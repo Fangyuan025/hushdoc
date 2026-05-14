@@ -132,3 +132,44 @@
   70%  { opacity: 0; }
   100% { opacity: 0; }
 }
+
+/* ---------------------------------------------------------------------------
+ * v0.5.0 PDF citation viewer.
+ *
+ * Minimal pdf.js text-layer styling -- enough to position spans on top of
+ * the canvas at their original glyph positions and keep the text invisible
+ * (we only want it for selection + as a target for the highlight overlay
+ * in commit 8). The full pdf_viewer.css ships ~30kb of unrelated rules
+ * (annotations, editor toolbar, sidebar) so we hand-roll the slice we
+ * actually need.
+ * ------------------------------------------------------------------------- */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  transform-origin: 0 0;
+  --scale-factor: 1;
+}
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+.textLayer ::selection {
+  background: color-mix(in oklch, var(--primary) 35%, transparent);
+}
+/* Commit 8 will add `.textLayer .chunkMatch` to paint the highlight
+ * over fuzzy-matched spans. Reserved here so the class name is stable. */
+.textLayer .chunkMatch {
+  background: color-mix(in oklch, var(--primary) 30%, transparent);
+  border-radius: 2px;
+  mix-blend-mode: multiply;
+}

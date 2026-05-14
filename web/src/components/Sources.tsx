@@ -21,14 +21,18 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Activity,
+  BookOpen,
   FileText,
   Sparkles,
   X,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { useDocuments } from "@/hooks/useDocuments"
 import { cn } from "@/lib/utils"
 import type { RetrievalTraceEntry, SourceDoc } from "@/types"
+
+import { PdfChunkViewer } from "./PdfChunkViewer"
 
 interface SourcesProps {
   docs: SourceDoc[]
@@ -54,10 +58,33 @@ export function Sources({ docs, standaloneQuery, trace, mode }: SourcesProps) {
       )
   }, [docs])
 
+  // v0.5.0: which filenames have an on-disk raw copy the viewer can
+  // open. Pulled from the same /api/documents cache the Library panel
+  // uses, so no extra roundtrip per message. Files ingested before
+  // raw retention (or typed/pasted items) are absent and the citation
+  // chip stays a snippet-only quick-peek.
+  const docList = useDocuments().list
+  const filenamesWithRaw = useMemo(() => {
+    const set = new Set<string>()
+    for (const f of docList.data?.files ?? []) {
+      if (f.has_raw) set.add(f.filename)
+    }
+    return set
+  }, [docList.data])
+  const hasRaw = (filename: string) => filenamesWithRaw.has(filename)
+
   // Drawer state — open / which tab / which chunk to focus.
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"sources" | "trace">("sources")
   const [focusKey, setFocusKey] = useState<string | null>(null)
+
+  // v0.5.0 viewer modal state. Independent of the drawer so the user
+  // can have both open at once -- drawer on the right with the chunk
+  // list, modal in the center with the rendered PDF page. Closing the
+  // viewer leaves the drawer right where it was.
+  const [viewing, setViewing] = useState<SourceDoc | null>(null)
+  const openViewer = (doc: SourceDoc) => setViewing(doc)
+  const closeViewer = () => setViewing(null)
 
   return (
     <div className="mt-2 space-y-1.5">
@@ -107,10 +134,20 @@ export function Sources({ docs, standaloneQuery, trace, mode }: SourcesProps) {
           mode={mode}
           initialTab={tab}
           focusKey={focusKey}
+          hasRaw={hasRaw}
+          onOpenViewer={openViewer}
           onClose={() => {
             setOpen(false)
             setFocusKey(null)
           }}
+        />
+      )}
+      {viewing && (
+        <PdfChunkViewer
+          filename={viewing.filename}
+          initialPage={viewing.page ?? 1}
+          chunkText={viewing.snippet}
+          onClose={closeViewer}
         />
       )}
     </div>
@@ -128,6 +165,8 @@ function SourcesDrawer({
   mode,
   initialTab,
   focusKey,
+  hasRaw,
+  onOpenViewer,
   onClose,
 }: {
   docs: SourceDoc[]
@@ -136,6 +175,8 @@ function SourcesDrawer({
   mode?: string
   initialTab: "sources" | "trace"
   focusKey: string | null
+  hasRaw: (filename: string) => boolean
+  onOpenViewer: (doc: SourceDoc) => void
   onClose: () => void
 }) {
   const [tab, setTab] = useState(initialTab)
@@ -199,6 +240,8 @@ function SourcesDrawer({
               docs={docs}
               standaloneQuery={standaloneQuery}
               focusKey={focusKey}
+              hasRaw={hasRaw}
+              onOpenViewer={onOpenViewer}
             />
           ) : (
             <TraceTab trace={trace || []} />
@@ -251,10 +294,14 @@ function SourcesTab({
   docs,
   standaloneQuery,
   focusKey,
+  hasRaw,
+  onOpenViewer,
 }: {
   docs: SourceDoc[]
   standaloneQuery?: string
   focusKey: string | null
+  hasRaw: (filename: string) => boolean
+  onOpenViewer: (doc: SourceDoc) => void
 }) {
   const focusRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -288,6 +335,7 @@ function SourcesTab({
       {docs.map((d, i) => {
         const key = `${d.filename}#${d.page ?? "?"}`
         const isFocus = key === focusKey
+        const viewerOk = hasRaw(d.filename)
         return (
           <div
             key={i}
@@ -306,6 +354,17 @@ function SourcesTab({
                 <span className="truncate text-muted-foreground/70">
                   · {d.headings}
                 </span>
+              )}
+              {viewerOk && (
+                <button
+                  type="button"
+                  onClick={() => onOpenViewer(d)}
+                  className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-primary hover:bg-primary/10"
+                  title="Open this page in the PDF viewer"
+                >
+                  <BookOpen className="h-3 w-3" />
+                  open
+                </button>
               )}
             </div>
             <div className="whitespace-pre-wrap text-muted-foreground">
