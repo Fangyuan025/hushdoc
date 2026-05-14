@@ -566,7 +566,7 @@ def format_documents(
 # otherwise citations on pasted text / markdown notes never matched and
 # the Sources panel silently fell through to showing every retrieved doc.
 _CITATION_RE = re.compile(
-    r"\[([^\[\]]+?\.(?:pdf|docx|md|markdown|txt|jpe?g|png|tiff?|bmp))"
+    r"\[([^\[\]]+?\.(?:pdf|docx|epub|md|markdown|txt|jpe?g|png|tiff?|bmp))"
     r"\s*[, ]\s*(?:p\.?|page)\s*(\d+(?:\s*[-–]\s*\d+)?)\]",
     re.IGNORECASE,
 )

@@ -50,12 +50,18 @@ DEFAULT_DATA_DIR = Path("./data")
 PDF_SUFFIXES = {".pdf"}
 DOCX_SUFFIXES = {".docx"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+# EPUB goes through Docling's native EpubDocumentBackend (no OCR needed,
+# real semantic structure: chapters, headings, paragraphs). v0.5.0.
+EPUB_SUFFIXES = {".epub"}
 # Plain text + markdown skips Docling entirely (no layout/OCR model needed).
 # Treated as a single "page 1" downstream because the citation chip
 # already shows '[filename p.N]'; pinning to 1 keeps that surface intact
 # without forcing the chain to handle page=None.
 TEXT_SUFFIXES = {".txt", ".md", ".markdown"}
-SUPPORTED_SUFFIXES = PDF_SUFFIXES | DOCX_SUFFIXES | IMAGE_SUFFIXES | TEXT_SUFFIXES
+SUPPORTED_SUFFIXES = (
+    PDF_SUFFIXES | DOCX_SUFFIXES | IMAGE_SUFFIXES
+    | EPUB_SUFFIXES | TEXT_SUFFIXES
+)
 
 
 @dataclass
@@ -142,6 +148,10 @@ class PDFIngestor:
         return path.suffix.lower() in DOCX_SUFFIXES
 
     @staticmethod
+    def _is_epub(path: Path) -> bool:
+        return path.suffix.lower() in EPUB_SUFFIXES
+
+    @staticmethod
     def _is_plaintext(path: Path) -> bool:
         return path.suffix.lower() in TEXT_SUFFIXES
 
@@ -175,10 +185,21 @@ class PDFIngestor:
         if self._is_plaintext(src_path):
             return self._ingest_plaintext(src_path)
 
+        # EPUB: Docling at our pin (2.x) doesn't include EPUB in its
+        # allowed input formats. Rather than wait on upstream, we extract
+        # the XHTML chapters ourselves and route them through the same
+        # heading-aware plaintext splitter. Lossy on inline footnotes /
+        # complex layouts; good enough for the typical 'chat with my
+        # ebook' use case.
+        if self._is_epub(src_path):
+            return self._ingest_epub(src_path)
+
         if self._is_image(src_path):
             kind = "image (OCR)"
         elif self._is_docx(src_path):
             kind = "DOCX"
+        elif self._is_epub(src_path):
+            kind = "EPUB"
         else:
             kind = "PDF"
         logger.info("Parsing %s with Docling: %s", kind, src_path.name)
@@ -438,6 +459,144 @@ class PDFIngestor:
         return IngestionResult(
             source_path=src_path,
             markdown=text,
+            documents=documents,
+        )
+
+    # ------------------------------------------------------------- EPUB path
+    def _ingest_epub(self, src_path: Path) -> IngestionResult:
+        """Extract XHTML chapters from an EPUB and route them through the
+        plaintext splitter. We don't go through Docling because its 2.x
+        line doesn't list EPUB in InputFormat -- waiting on upstream
+        rather than wiring this would block real users (research papers
+        often come paired with an ebook of the same topic).
+
+        EPUB structure:
+          - It's a zip file with mimetype 'application/epub+zip'
+          - META-INF/container.xml points at the package OPF
+          - The OPF's <spine> orders the XHTML chapter files
+          - Each chapter is XHTML; we strip tags via BeautifulSoup
+
+        We preserve chapter order via spine, prefix each chapter's text
+        with its first heading (if any), then concatenate with paragraph
+        separators and feed to the same splitter as txt/md. Each chunk
+        gets `page: chapter_index + 1` so the citation chip still shows
+        a useful page-equivalent ('[book.epub p.3]' = chapter 3).
+        """
+        import zipfile
+        from xml.etree import ElementTree as ET
+        from bs4 import BeautifulSoup
+
+        logger.info("Reading EPUB: %s", src_path.name)
+        try:
+            zf = zipfile.ZipFile(src_path)
+        except Exception as exc:
+            raise RuntimeError(f"Couldn't open EPUB {src_path}: {exc}") from exc
+
+        try:
+            # 1. Find the OPF path via META-INF/container.xml
+            container_xml = zf.read("META-INF/container.xml").decode("utf-8", "replace")
+            container = ET.fromstring(container_xml)
+            # Namespace-agnostic find for <rootfile full-path="...">
+            opf_path = None
+            for el in container.iter():
+                if el.tag.endswith("rootfile") and "full-path" in el.attrib:
+                    opf_path = el.attrib["full-path"]
+                    break
+            if not opf_path:
+                raise RuntimeError("EPUB container.xml had no <rootfile full-path=...>")
+
+            # 2. Parse the OPF to get spine order + manifest id -> href map
+            opf_dir = "/".join(opf_path.split("/")[:-1])
+            opf_xml = zf.read(opf_path).decode("utf-8", "replace")
+            opf = ET.fromstring(opf_xml)
+            id_to_href: dict = {}
+            for el in opf.iter():
+                if el.tag.endswith("item"):
+                    item_id = el.attrib.get("id")
+                    href = el.attrib.get("href")
+                    media = el.attrib.get("media-type", "")
+                    if item_id and href and "html" in media:
+                        id_to_href[item_id] = href
+            spine_ids: list = []
+            for el in opf.iter():
+                if el.tag.endswith("itemref"):
+                    rid = el.attrib.get("idref")
+                    if rid:
+                        spine_ids.append(rid)
+
+            # 3. Read each chapter in spine order, strip to text
+            chapter_texts: list[tuple[str, str]] = []  # (heading, body)
+            for rid in spine_ids:
+                href = id_to_href.get(rid)
+                if not href:
+                    continue
+                chapter_path = f"{opf_dir}/{href}" if opf_dir else href
+                try:
+                    raw = zf.read(chapter_path).decode("utf-8", "replace")
+                except KeyError:
+                    continue
+                soup = BeautifulSoup(raw, "html.parser")
+                # First H1/H2/H3 = chapter heading
+                heading_tag = soup.find(["h1", "h2", "h3"])
+                heading = heading_tag.get_text(" ", strip=True) if heading_tag else ""
+                # Drop script/style noise before extracting prose
+                for bad in soup(["script", "style"]):
+                    bad.decompose()
+                body = soup.get_text("\n", strip=True)
+                if body:
+                    chapter_texts.append((heading, body))
+        finally:
+            zf.close()
+
+        if not chapter_texts:
+            logger.warning("EPUB %s yielded no extractable text.", src_path.name)
+            return IngestionResult(source_path=src_path, markdown="", documents=[])
+
+        # 4. Build chunks per chapter via the same splitter as txt/md
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=900,
+            chunk_overlap=120,
+            separators=[
+                "\n\n", "\n",
+                ". ", "? ", "! ", "。", "？", "！",
+                " ", "",
+            ],
+        )
+        documents: List[Document] = []
+        markdown_parts: list[str] = []
+        global_idx = 0
+        for chapter_idx, (heading, body) in enumerate(chapter_texts, start=1):
+            body = self._clean_text(body)
+            if heading:
+                markdown_parts.append(f"## {heading}\n\n{body}")
+            else:
+                markdown_parts.append(body)
+            for part in splitter.split_text(body):
+                part = part.strip()
+                if not part:
+                    continue
+                documents.append(Document(
+                    page_content=part,
+                    metadata={
+                        "source": str(src_path),
+                        "filename": src_path.name,
+                        "chunk_index": global_idx,
+                        # 'page' = chapter index so citations read
+                        # '[book.epub p.3]' meaning chapter 3.
+                        "page": chapter_idx,
+                        "headings": heading,
+                    },
+                ))
+                global_idx += 1
+
+        logger.info(
+            "Extracted %d EPUB chunks from %s across %d chapters.",
+            len(documents), src_path.name, len(chapter_texts),
+        )
+        return IngestionResult(
+            source_path=src_path,
+            markdown="\n\n".join(markdown_parts),
             documents=documents,
         )
 

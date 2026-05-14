@@ -35,6 +35,7 @@ import type { FileMeta } from "@/types"
 const ACCEPT = [
   ".pdf",
   ".docx",
+  ".epub",
   ".jpg",
   ".jpeg",
   ".png",
