@@ -10,6 +10,7 @@ vector store lives on disk under ./chroma_db.
 from __future__ import annotations
 
 import logging
+import os
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,13 +37,44 @@ DEFAULT_COLLECTION = "pdf_rag"
 DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
+def pick_embed_device() -> str:
+    """v0.5.0: auto-pick between cuda and cpu for the embedding +
+    cross-encoder reranker models. Honors ``HUSHDOC_EMBED_DEVICE`` env
+    var (``cpu`` / ``cuda``) for explicit overrides. Falls back to CPU
+    if torch can't be imported OR cuda.is_available() returns False --
+    those failures shouldn't break a fresh install on a CPU-only box.
+
+    Pre-v0.5.0 this was hardcoded to ``cpu`` which left a 10-50x
+    embedding-throughput improvement on the floor for users with a
+    perfectly good GPU sitting idle (the LLM is the only thing that
+    was using it). Reranker had the same issue; both share this
+    resolver now."""
+    override = os.environ.get("HUSHDOC_EMBED_DEVICE", "").strip().lower()
+    if override in {"cpu", "cuda"}:
+        return override
+    try:
+        import torch  # type: ignore
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        # Torch import failure / no NVIDIA libs / etc. -> CPU is the
+        # only safe default.
+        pass
+    return "cpu"
+
+
 @dataclass
 class VectorStoreConfig:
     persist_directory: Path = DEFAULT_PERSIST_DIR
     collection_name: str = DEFAULT_COLLECTION
     embedding_model_name: str = DEFAULT_EMBED_MODEL
-    # Run on CPU by default to stay portable; switch to "cuda" if available.
-    device: str = "cpu"
+    # v0.5.0: device is resolved by pick_embed_device() at construction
+    # time (auto = cuda if available else cpu, env override via
+    # HUSHDOC_EMBED_DEVICE). Use field(default_factory=...) instead of
+    # a plain string so the resolution happens per-instance, not at
+    # class-import time (which would freeze the answer if torch became
+    # available later in the process lifetime).
+    device: str = field(default_factory=pick_embed_device)
     normalize_embeddings: bool = True
     model_kwargs: dict = field(default_factory=dict)
 
@@ -216,6 +248,10 @@ class LocalVectorStore:
     _TRANSIENT_HINTS = (
         "lock", "busy", "i/o disk", "temporarily unavailable",
         "does not exist", "not found", "notfounderror", "no such table",
+        # v0.5.0: chromadb's HNSW segment reader raises this when a
+        # concurrent process writes to the collection between our open
+        # and our first query; same recovery (re-open the wrapper).
+        "nothing found on disk",
     )
 
     def _refresh_store(self) -> None:

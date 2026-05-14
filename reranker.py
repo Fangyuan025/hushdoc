@@ -36,6 +36,11 @@ _load_attempted = False
 def _load(model_name: str = DEFAULT_MODEL):
     """Lazy-load the cross-encoder. Caches a single instance.
     Falls through to None on failure so callers can degrade gracefully.
+
+    v0.5.0: device matches the embedding model's choice (CUDA when
+    available, CPU otherwise, HUSHDOC_EMBED_DEVICE override). Pre-v0.5.0
+    was hardcoded ``cpu`` which made the cross-encoder a noticeable
+    fraction of per-query latency even with a GPU sitting idle.
     """
     global _model, _load_attempted
     if _model is not None or _load_attempted:
@@ -43,8 +48,14 @@ def _load(model_name: str = DEFAULT_MODEL):
     _load_attempted = True
     try:
         from sentence_transformers import CrossEncoder
-        logger.info("Loading cross-encoder reranker: %s (CPU)", model_name)
-        _model = CrossEncoder(model_name, device="cpu", max_length=512)
+        # Lazy import vector_store so reranker stays importable in
+        # contexts where chroma isn't available (smoke tests etc.).
+        from vector_store import pick_embed_device
+        device = pick_embed_device()
+        logger.info(
+            "Loading cross-encoder reranker: %s (device=%s)", model_name, device,
+        )
+        _model = CrossEncoder(model_name, device=device, max_length=512)
         logger.info("Cross-encoder ready.")
     except Exception:
         logger.exception("Cross-encoder load failed; reranker disabled.")
