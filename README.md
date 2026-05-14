@@ -107,6 +107,19 @@ air-gapped — Wi-Fi off, ethernet unplugged, doesn't matter.
   *while it's still being generated*, no awkward pause at the end.
 - **Replay** any prior answer with the 🔊 icon next to the message.
 
+#### Settings (⚙ gear in the header)
+- **Swap models live.** Type a new GGUF path, hit *Save* — the
+  backend stops the running `llama-server.exe` and restarts it
+  against the new model before the response returns, so a
+  successful toast really means "loaded and ready". Bad paths are
+  rejected up front (HTTP 400) without disturbing the running chain.
+- **Auto-cleanup on exit.** A single checkbox. When on, closing the
+  browser tells the launcher to wipe `chat_history/` +
+  `data/uploads/` + `chroma_db/` silently and close the terminal
+  with no prompts. When off (default) the per-category confirm
+  flow runs as before.
+- Settings persist to `./hushdoc_config.json` (gitignored).
+
 #### Polish
 - **Dark mode** that's actually comfortable at night (charcoal, not
   the typical inky black).
@@ -114,7 +127,16 @@ air-gapped — Wi-Fi off, ethernet unplugged, doesn't matter.
   for new chat, `Esc` cancels.
 - **One-click launcher** (`hushdoc.bat`) starts everything, opens the
   browser, and on exit asks whether to wipe your local data —
-  per-category, opt-in.
+  per-category, opt-in. (Skip the prompts: Settings → *Auto-cleanup
+  on exit*.)
+- **Library**: drop or pick files / a whole folder / pasted text;
+  per-file delete + metadata badges (`uploaded` / `folder` /
+  `typed`). Multi-file ingest is cancellable mid-flight.
+- **Sources drawer**: click a citation chip to slide out a side
+  panel with the cited chunks + a *Retrieval* tab showing every
+  candidate the bi-encoder fetched, with `rank_before → rank_after`
+  + cross-encoder score + a ★ on rows the answer actually used.
+- **Regenerate** / **copy** buttons on assistant messages.
 
 ---
 
@@ -194,14 +216,23 @@ Qwen3-1.7B model. Same `--cpu` / `--gpu-build` / `--force` overrides.
 
 ### Want a different / larger model?
 
-Drop any `.gguf` file at `.\models\model.gguf`, replacing the one
-setup downloaded. Pick something that fits your RAM — for example:
+Three equivalent ways (pick whichever feels easiest):
+
+1. **Settings page (live swap, no restart).** Click the ⚙ gear in
+   the header, paste any `.gguf` path into *Model file*, hit *Save*.
+   Hushdoc stops the running `llama-server.exe`, starts a fresh one
+   against the new model, and the next chat hits the new weights.
+   The save is rejected if the file isn't there or isn't `.gguf`.
+2. **Replace the file.** Drop your `.gguf` at `./models/model.gguf`
+   (overwriting the default Qwen3-1.7B) and restart Hushdoc.
+3. **Environment variable.** `LLAMA_MODEL_PATH=/path/to/your.gguf`
+   before launching.
+
+Examples sized to common RAM tiers:
 
 - **Qwen3-4B Q4_K_M** (~2.5 GB) — better reasoning, still fits on 8 GB RAM
 - **Mistral-7B-Instruct Q4_K_M** (~4.5 GB) — strong English baseline
 - **Llama-3.1-8B Q4_K_M** (~4.7 GB) — excellent general model
-
-You can also point at any other path via the `LLAMA_MODEL_PATH` env var.
 
 > **Note on prompts:** the system prompts include Qwen3's `/no_think` soft
 > switch (which suppresses Qwen3's `<think>...</think>` reasoning block).
@@ -247,7 +278,8 @@ After setup, Hushdoc opens in your default browser at
   Hushdoc didn't use a chunk, it won't pad the citation list with it.
 - **Closing the browser auto-stops the server** and offers to clean
   up your local data (conversations / uploads / vector index) — say
-  *no* to keep things, *y* to wipe.
+  *no* to keep things, *y* to wipe. Want it to skip the prompts and
+  always wipe? Settings → *Auto-cleanup on exit*.
 
 ---
 
@@ -303,7 +335,7 @@ hushdoc/
 ├── dev.sh / dev.ps1 plain dev launchers (no auto-cleanup)
 ├── VERSION          read by /api/health and shown in the UI footer
 └── CHANGELOG.md
-                     (gitignored: runtime/  models/*.gguf)
+                     (gitignored: runtime/  models/*.gguf  hushdoc_config.json)
 ```
 
 ---
