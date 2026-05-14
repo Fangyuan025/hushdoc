@@ -14,8 +14,10 @@ setlocal
 set "ROOT=%~dp0"
 pushd "%ROOT%"
 
-REM Switch cmd's codepage to UTF-8 so the banner's 🤫 emoji renders.
-chcp 65001 >nul 2>&1
+REM Deliberately no `chcp 65001` -- see hushdoc.bat for the explanation
+REM (legacy conhost swaps to TrueType + shrinks text when the codepage
+REM changes). The .ps1 setting [Console]::OutputEncoding handles UTF-8
+REM emoji output for modern terminals; legacy conhost just shows '?'.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%setup.ps1" %*
 set "EC=%ERRORLEVEL%"

@@ -13,9 +13,14 @@ setlocal
 set "ROOT=%~dp0"
 pushd "%ROOT%"
 
-REM Switch cmd's codepage to UTF-8 so the banner's 🤫 emoji renders
-REM correctly. Suppressed output keeps the terminal tidy.
-chcp 65001 >nul 2>&1
+REM NOTE: we deliberately do NOT `chcp 65001` here. Switching the
+REM cmd codepage in legacy conhost.exe forces a font swap (raster ->
+REM TrueType) which makes every glyph render visibly smaller -- the
+REM 'why did my terminal text shrink?' complaint. The .ps1 below
+REM still sets [Console]::OutputEncoding = UTF8 so banner emoji
+REM bytes flow correctly into modern terminals (Windows Terminal /
+REM PS 7+ / Linux / macOS). Legacy conhost falls back to '?' for
+REM the 🤫 emoji, which is a much better failure mode than tiny text.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%hushdoc.ps1" %*
 set "EC=%ERRORLEVEL%"
