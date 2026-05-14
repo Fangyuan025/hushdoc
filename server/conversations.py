@@ -29,9 +29,36 @@ DEFAULT_DIR = Path("./chat_history")
 INDEX_FILENAME = "index.json"
 
 
+class AssistantVariant(TypedDict, total=False):
+    """v0.5.0: one regenerated version of an assistant turn.
+
+    Multi-variant model: a user msg can be followed by an assistant msg
+    that holds N variants -- the user navigates between them with the
+    < N/M > pager. The currently-displayed variant is the one whose
+    content / sources / trace the model sees as 'prior assistant turn'
+    when generating the next reply."""
+    content: str
+    # Optional metadata that goes into the Sources drawer + retrieval-
+    # trace tab. Kept as raw dicts so the schema mirrors the SSE
+    # payload shape; the chain doesn't need to deserialise this.
+    sources: List[Dict]
+    retrieval_trace: List[Dict]
+    retrieval_mode: str
+    standalone_question: str
+    chitchat: bool
+    ts: float
+    error: str  # set when the variant generation failed mid-stream
+
+
 class ConvMessage(TypedDict, total=False):
     role: str           # "user" | "assistant"
+    # User messages: 'content' is the typed text. Assistant messages
+    # may use 'content' (pre-v0.5.0 shape) OR 'variants' + 'active_variant'
+    # (v0.5.0 multi-variant shape). Reads always go through
+    # normalize_message() which converts the legacy shape to variants.
     content: str
+    variants: List[AssistantVariant]
+    active_variant: int  # index into variants
     ts: float           # unix timestamp
 
 
@@ -51,6 +78,52 @@ class Conversation(ConvMeta, total=False):
     # so a long convo doesn't fill the file. Items are flattened
     # Document dicts (filename / chunk_index / page_content / metadata).
     recent_chunks: List[Dict]
+
+
+def normalize_message(msg: Dict) -> Dict:
+    """Back-compat: legacy assistant messages ({role, content}) get
+    wrapped into the variants shape so the rest of the codebase only
+    ever has to deal with one format. Idempotent -- a message already
+    in variant shape passes through unchanged. User messages always
+    pass through unchanged."""
+    if not isinstance(msg, dict):
+        return msg
+    if msg.get("role") != "assistant":
+        return msg
+    if "variants" in msg and isinstance(msg["variants"], list):
+        # Already in v0.5.0 shape. Make sure active_variant is in range.
+        n = len(msg["variants"])
+        if n == 0:
+            # Shouldn't happen, but recover by treating as legacy.
+            return msg
+        active = msg.get("active_variant", 0)
+        if not isinstance(active, int) or active < 0 or active >= n:
+            msg["active_variant"] = 0
+        return msg
+    # Legacy: lift content into a single-variant array
+    content = msg.get("content", "")
+    return {
+        "role": "assistant",
+        "ts": msg.get("ts"),
+        "variants": [
+            {"content": content, "ts": msg.get("ts")},
+        ],
+        "active_variant": 0,
+    }
+
+
+def active_content(msg: Dict) -> str:
+    """For assistant messages, return the content of the active
+    variant (the one the user is currently viewing in the pager and
+    therefore the one subsequent turns build on)."""
+    if msg.get("role") == "assistant" and "variants" in msg:
+        variants = msg["variants"] or []
+        if not variants:
+            return ""
+        idx = msg.get("active_variant", 0)
+        idx = max(0, min(idx, len(variants) - 1))
+        return variants[idx].get("content", "")
+    return msg.get("content", "")
 
 
 @dataclass
@@ -95,10 +168,17 @@ class ConversationStore:
         if not p.exists():
             return None
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            conv = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             logger.exception("Conv %s unreadable.", conv_id)
             return None
+        # Normalise messages on read so callers only see the v0.5.0
+        # variant shape. Legacy assistant messages ({role, content}) are
+        # lifted into a single-variant array; user messages and already-
+        # normalised assistant messages pass through unchanged.
+        if isinstance(conv, dict) and isinstance(conv.get("messages"), list):
+            conv["messages"] = [normalize_message(m) for m in conv["messages"]]
+        return conv
 
     def _write_conv(self, conv: Conversation) -> None:
         p = self._conv_path(conv["id"])
@@ -154,7 +234,12 @@ class ConversationStore:
         messages: List[ConvMessage],
     ) -> Optional[Conversation]:
         """Append one or more messages and bump updated_at. Returns the
-        full conversation after the write, or None if the id is unknown."""
+        full conversation after the write, or None if the id is unknown.
+
+        v0.5.0: assistant messages are always written in variants shape.
+        If a caller hands us a legacy ``{role: assistant, content: ...}``
+        we wrap it into a single-variant array before persisting so the
+        on-disk format stays consistent."""
         conv = self._read_conv(conv_id)
         if not conv:
             return None
@@ -162,8 +247,106 @@ class ConversationStore:
         now = time.time()
         for m in messages:
             m.setdefault("ts", now)
+            if m.get("role") == "assistant":
+                # Force variants shape on write.
+                if "variants" not in m or not isinstance(m.get("variants"), list):
+                    content = m.get("content", "")
+                    variant: Dict = {"content": content, "ts": m["ts"]}
+                    # Carry through any optional sidecar fields the caller
+                    # supplied alongside content (sources / trace / etc.)
+                    # so the active variant holds the full payload.
+                    for key in (
+                        "sources",
+                        "retrieval_trace",
+                        "retrieval_mode",
+                        "standalone_question",
+                        "chitchat",
+                        "error",
+                    ):
+                        if key in m:
+                            variant[key] = m[key]
+                    m = {
+                        "role": "assistant",
+                        "ts": m["ts"],
+                        "variants": [variant],
+                        "active_variant": 0,
+                    }
+                else:
+                    # Caller passed an already-shaped variants message --
+                    # make sure active_variant is sane.
+                    n = len(m["variants"])
+                    if n > 0:
+                        a = m.get("active_variant", 0)
+                        if not isinstance(a, int) or a < 0 or a >= n:
+                            m["active_variant"] = 0
             conv["messages"].append(m)
         conv["updated_at"] = now
+        self._write_conv(conv)
+        return conv
+
+    def append_variant(
+        self,
+        conv_id: str,
+        message_index: int,
+        variant: Dict,
+    ) -> Optional[Conversation]:
+        """v0.5.0: append a new regenerated variant to an assistant
+        message and make it the active one. ``message_index`` is the
+        index into ``conv["messages"]`` of the assistant turn being
+        regenerated. Returns the full conversation post-write, or None
+        on bad id / bad index / non-assistant target."""
+        conv = self._read_conv(conv_id)
+        if not conv:
+            return None
+        msgs = conv.get("messages", [])
+        if message_index < 0 or message_index >= len(msgs):
+            logger.warning(
+                "append_variant: bad message_index %d (have %d msgs)",
+                message_index, len(msgs),
+            )
+            return None
+        target = msgs[message_index]
+        if target.get("role") != "assistant":
+            logger.warning(
+                "append_variant: msg %d is not an assistant turn", message_index
+            )
+            return None
+        # _read_conv already normalised this, but defend in depth.
+        target = normalize_message(target)
+        variant.setdefault("ts", time.time())
+        target.setdefault("variants", []).append(variant)
+        target["active_variant"] = len(target["variants"]) - 1
+        msgs[message_index] = target
+        conv["messages"] = msgs
+        conv["updated_at"] = time.time()
+        self._write_conv(conv)
+        return conv
+
+    def set_active_variant(
+        self,
+        conv_id: str,
+        message_index: int,
+        variant_index: int,
+    ) -> Optional[Conversation]:
+        """Switch which variant of an assistant turn is 'live'. The
+        active variant is what later turns see as the prior assistant
+        reply, so flipping this also flips the chain's view of history."""
+        conv = self._read_conv(conv_id)
+        if not conv:
+            return None
+        msgs = conv.get("messages", [])
+        if message_index < 0 or message_index >= len(msgs):
+            return None
+        target = normalize_message(msgs[message_index])
+        if target.get("role") != "assistant":
+            return None
+        n = len(target.get("variants", []))
+        if n == 0 or variant_index < 0 or variant_index >= n:
+            return None
+        target["active_variant"] = variant_index
+        msgs[message_index] = target
+        conv["messages"] = msgs
+        conv["updated_at"] = time.time()
         self._write_conv(conv)
         return conv
 

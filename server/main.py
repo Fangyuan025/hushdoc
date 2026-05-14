@@ -33,7 +33,10 @@ from sse_starlette.sse import EventSourceResponse
 import doc_summaries
 from server import config as app_config
 from server import deps
-from server.conversations import default_store as conv_store
+from server.conversations import (
+    default_store as conv_store,
+    active_content as conv_active_content,
+)
 from server.schemas import (
     AppConfigResponse,
     AppConfigUpdateRequest,
@@ -49,9 +52,11 @@ from server.schemas import (
     DeleteOneFileResponse,
     DocumentsResponse,
     FileMeta,
+    MessageVariant,
     PasteTextRequest,
     HealthResponse,
     RenameConversationRequest,
+    SetActiveVariantRequest,
     VoiceHealthResponse,
     VoiceSynthesizeRequest,
     VoiceTranscribeResponse,
@@ -444,36 +449,84 @@ async def chat(req: ChatRequest):
     persisted to ``./chat_history/<id>.json`` and (on the first turn) an
     auto-title is generated and emitted as a ``title`` event so the
     sidebar can update without a separate roundtrip.
-    """
-    if not req.question or not req.question.strip():
-        raise HTTPException(status_code=400, detail="question is empty")
 
+    v0.5.0 regenerate mode (``regenerate=True``): instead of appending a
+    new ``(user, assistant)`` pair, re-runs the chain against the last
+    user turn and appends the new answer as an additional **variant** on
+    the tail assistant message. ``question`` is ignored in this mode --
+    we always use the conversation's last user message so the regen is
+    grounded in exactly the same prompt the user already asked.
+    """
     chain = deps.get_chain()
-    # The chain memory key: prefer a real conversation id when present so
-    # different convs keep separate rewriter / chat-history state.
     memory_key = req.conversation_id or req.session_id
 
+    # ------------------------------------------------------------------
+    # Regenerate path -- requires an existing conversation whose tail is
+    # an assistant message. We splice the chain history so the rewriter
+    # sees everything *up to and including* the last user message, but
+    # NOT the prior assistant reply (otherwise the new variant would be
+    # biased toward repeating it verbatim).
+    # ------------------------------------------------------------------
     conv_before = None
-    if req.conversation_id:
+    regen_target_index: int = -1
+    regen_question: str = req.question
+    if req.regenerate:
+        if not req.conversation_id:
+            raise HTTPException(
+                status_code=400,
+                detail="regenerate requires conversation_id",
+            )
         conv_before = conv_store.get(req.conversation_id)
         if conv_before is None:
             raise HTTPException(
-                status_code=404, detail=f"conversation {req.conversation_id} not found",
+                status_code=404,
+                detail=f"conversation {req.conversation_id} not found",
             )
-        # Hydrate the chain's in-memory chat history from disk so the
-        # rewriter and follow-up boost see the right context even after
-        # a server restart.
-        chain.hydrate_session(memory_key, conv_before.get("messages", []))
-        # v0.5.0: also restore the rolling chunk window so the +memory(N)
-        # retrieval boost works on the FIRST turn after a backend restart.
-        # Stale chunks (their doc was deleted between sessions) are dropped
-        # inside preload_session_memory.
+        msgs = conv_before.get("messages", [])
+        if not msgs or msgs[-1].get("role") != "assistant":
+            raise HTTPException(
+                status_code=400,
+                detail="regenerate: last message is not an assistant turn",
+            )
+        # Find the user message immediately preceding the assistant tail.
+        if len(msgs) < 2 or msgs[-2].get("role") != "user":
+            raise HTTPException(
+                status_code=400,
+                detail="regenerate: cannot locate prior user message",
+            )
+        regen_target_index = len(msgs) - 1
+        regen_question = msgs[-2].get("content", "") or ""
+        if not regen_question.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="regenerate: prior user message is empty",
+            )
+        # Hydrate WITHOUT the tail assistant -- the rewriter should see
+        # exactly what it saw the first time around.
+        chain.hydrate_session(memory_key, msgs[:-1])
         chain.preload_session_memory(
             memory_key, conv_before.get("recent_chunks", []) or [],
         )
+    else:
+        if not req.question or not req.question.strip():
+            raise HTTPException(status_code=400, detail="question is empty")
+        if req.conversation_id:
+            conv_before = conv_store.get(req.conversation_id)
+            if conv_before is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"conversation {req.conversation_id} not found",
+                )
+            # Hydrate the chain's in-memory chat history from disk so the
+            # rewriter and follow-up boost see the right context even
+            # after a server restart.
+            chain.hydrate_session(memory_key, conv_before.get("messages", []))
+            chain.preload_session_memory(
+                memory_key, conv_before.get("recent_chunks", []) or [],
+            )
 
     events = chain.stream(
-        req.question,
+        regen_question,
         session_id=memory_key,
         filenames=req.filenames or None,
     )
@@ -481,57 +534,129 @@ async def chat(req: ChatRequest):
     async def _augment_with_persistence():
         """Wrap the chain SSE stream with side-effects:
         1. Forward every event to the client unchanged.
-        2. When the 'done' event fires, persist user+assistant messages.
-        3. If this was the conversation's first turn, generate a title
-           and emit a 'title' event before closing the stream.
+        2. Capture standalone / sources / done payloads so we can persist
+           the full variant payload, not just the answer text.
+        3. On ``done``, persist either a new (user, assistant) pair (the
+           normal path) or a new variant on the tail assistant message
+           (the regenerate path).
+        4. If this was the conversation's first turn, generate a title
+           and emit a ``title`` event before closing the stream.
         """
         final_answer = ""
+        # Sidecar payload captured from the stream for the variant write.
+        captured_standalone: str = ""
+        captured_sources: list = []
+        captured_trace: list = []
+        captured_mode: str = ""
+        captured_chitchat: bool = False
+
+        import json as _json
         async for ev in chain_stream_to_sse(events):
-            yield ev
-            if ev.get("event") == "done" and req.conversation_id:
+            # On the regenerate path we annotate the done frame with the
+            # message_index the new variant attaches to so the frontend
+            # knows which bubble to update without re-fetching the conv.
+            if ev.get("event") == "standalone":
                 try:
-                    import json as _json
+                    captured_standalone = _json.loads(ev["data"]).get("query", "") or ""
+                except Exception:
+                    pass
+            elif ev.get("event") == "sources":
+                try:
+                    captured_sources = _json.loads(ev["data"]).get("docs", []) or []
+                except Exception:
+                    pass
+            elif ev.get("event") == "done":
+                try:
                     payload = _json.loads(ev["data"])
                     final_answer = payload.get("answer", "") or ""
+                    captured_trace = payload.get("retrieval_trace", []) or []
+                    captured_mode = payload.get("retrieval_mode", "") or ""
+                    captured_chitchat = bool(payload.get("chitchat", False))
+                    if not captured_sources:
+                        captured_sources = payload.get("source_documents", []) or []
+                    if req.regenerate and req.conversation_id:
+                        payload["regenerated_message_index"] = regen_target_index
+                        ev = {
+                            "event": "done",
+                            "data": _json.dumps(payload, ensure_ascii=False),
+                        }
                 except Exception:
                     final_answer = ""
-        if req.conversation_id and final_answer:
-            try:
+            yield ev
+
+        if not (req.conversation_id and final_answer):
+            return
+
+        try:
+            variant_payload = {
+                "content": final_answer,
+                "sources": captured_sources,
+                "retrieval_trace": captured_trace,
+                "retrieval_mode": captured_mode,
+                "standalone_question": captured_standalone,
+                "chitchat": captured_chitchat,
+            }
+            if req.regenerate:
+                conv_after = conv_store.append_variant(
+                    req.conversation_id,
+                    regen_target_index,
+                    variant_payload,
+                )
+                # Surface the new variant index so the frontend can flip
+                # its pager to the freshly-generated answer.
+                if conv_after is not None:
+                    target = conv_after["messages"][regen_target_index]
+                    new_variant_index = target.get("active_variant", 0)
+                    yield {
+                        "event": "variant_done",
+                        "data": _json.dumps({
+                            "conversation_id": req.conversation_id,
+                            "message_index": regen_target_index,
+                            "variant_index": new_variant_index,
+                            "variant_count": len(target.get("variants", [])),
+                        }, ensure_ascii=False),
+                    }
+            else:
                 conv_store.append_messages(
                     req.conversation_id,
                     [
                         {"role": "user", "content": req.question},
-                        {"role": "assistant", "content": final_answer},
+                        {"role": "assistant", **variant_payload},
                     ],
                 )
-                # v0.5.0: persist the chain's rolling chunk window
-                # alongside the messages so a backend restart preserves
-                # the +memory(N) follow-up boost. No-op when the chain
-                # didn't select any chunks (chitchat turns, empty index).
-                try:
-                    mem = chain.export_session_memory(memory_key)
-                    if mem:
-                        conv_store.set_recent_chunks(req.conversation_id, mem)
-                except Exception:
-                    logger.exception("Failed to persist session memory.")
-                # Auto-title on the very first turn (now exactly 2 msgs).
-                refreshed = conv_store.get(req.conversation_id) or {}
-                msg_count = len(refreshed.get("messages", []))
-                current_title = refreshed.get("title", "")
-                if msg_count <= 2 and (not current_title or current_title == "New chat"):
-                    title = await asyncio.to_thread(
-                        chain.generate_title, req.question, final_answer,
-                    )
-                    conv_store.set_title(req.conversation_id, title)
-                    yield {
-                        "event": "title",
-                        "data": __import__("json").dumps(
-                            {"conversation_id": req.conversation_id, "title": title},
-                            ensure_ascii=False,
-                        ),
-                    }
+            # v0.5.0: persist the chain's rolling chunk window alongside
+            # the messages so a backend restart preserves the +memory(N)
+            # follow-up boost. No-op when the chain didn't select any
+            # chunks (chitchat turns, empty index).
+            try:
+                mem = chain.export_session_memory(memory_key)
+                if mem:
+                    conv_store.set_recent_chunks(req.conversation_id, mem)
             except Exception:
-                logger.exception("Conversation persistence/title failed.")
+                logger.exception("Failed to persist session memory.")
+
+            # Auto-title only on the very first turn of a fresh
+            # conversation. Regenerate is, by definition, not the first
+            # turn, so we skip the title pass there.
+            if req.regenerate:
+                return
+            refreshed = conv_store.get(req.conversation_id) or {}
+            msg_count = len(refreshed.get("messages", []))
+            current_title = refreshed.get("title", "")
+            if msg_count <= 2 and (not current_title or current_title == "New chat"):
+                title = await asyncio.to_thread(
+                    chain.generate_title, req.question, final_answer,
+                )
+                conv_store.set_title(req.conversation_id, title)
+                yield {
+                    "event": "title",
+                    "data": _json.dumps(
+                        {"conversation_id": req.conversation_id, "title": title},
+                        ensure_ascii=False,
+                    ),
+                }
+        except Exception:
+            logger.exception("Conversation persistence/title failed.")
 
     return EventSourceResponse(
         _augment_with_persistence(),
@@ -562,6 +687,39 @@ def create_conversation(req: CreateConversationRequest) -> ConversationDetail:
     )
 
 
+def _message_to_schema(m: dict) -> ConversationMessage:
+    """Project a stored message (possibly variants shape) to the wire
+    schema. ``content`` always carries the active variant's text so old
+    clients keep working; ``variants`` + ``active_variant`` are populated
+    for assistant messages so v0.5.0 clients can render the pager."""
+    role = m.get("role", "user")
+    if role == "assistant" and isinstance(m.get("variants"), list):
+        return ConversationMessage(
+            role="assistant",
+            content=conv_active_content(m),
+            ts=m.get("ts"),
+            variants=[
+                MessageVariant(
+                    content=v.get("content", ""),
+                    ts=v.get("ts"),
+                    sources=v.get("sources"),
+                    retrieval_trace=v.get("retrieval_trace"),
+                    retrieval_mode=v.get("retrieval_mode"),
+                    standalone_question=v.get("standalone_question"),
+                    chitchat=v.get("chitchat"),
+                    error=v.get("error"),
+                )
+                for v in m["variants"]
+            ],
+            active_variant=m.get("active_variant", 0),
+        )
+    return ConversationMessage(
+        role=role,
+        content=m.get("content", ""),
+        ts=m.get("ts"),
+    )
+
+
 @app.get("/api/conversations/{conv_id}", response_model=ConversationDetail)
 def get_conversation(conv_id: str) -> ConversationDetail:
     conv = conv_store.get(conv_id)
@@ -572,7 +730,7 @@ def get_conversation(conv_id: str) -> ConversationDetail:
         title=conv["title"],
         created_at=conv["created_at"],
         updated_at=conv["updated_at"],
-        messages=[ConversationMessage(**m) for m in conv.get("messages", [])],
+        messages=[_message_to_schema(m) for m in conv.get("messages", [])],
     )
 
 
@@ -598,6 +756,41 @@ def rename_conversation(conv_id: str, req: RenameConversationRequest) -> Convers
         created_at=conv["created_at"],
         updated_at=conv["updated_at"],
         message_count=len(conv.get("messages", [])),
+    )
+
+
+@app.patch(
+    "/api/conversations/{conv_id}/messages/{message_index}/active_variant",
+    response_model=ConversationDetail,
+)
+def set_active_variant(
+    conv_id: str,
+    message_index: int,
+    req: SetActiveVariantRequest,
+) -> ConversationDetail:
+    """v0.5.0: switch which variant of an assistant message is the
+    'live' one. The chain's in-memory history is also rehydrated so
+    the next turn sees the chosen variant as the prior reply."""
+    conv = conv_store.set_active_variant(
+        conv_id, message_index, req.variant_index,
+    )
+    if not conv:
+        raise HTTPException(
+            status_code=404,
+            detail="conversation, message, or variant index not found",
+        )
+    # Refresh chain history to mirror the new active variant. Without
+    # this, the rewriter on the next turn would still see whatever
+    # variant was active when the session was last hydrated.
+    chain = deps.get_chain_if_loaded()
+    if chain is not None:
+        chain.hydrate_session(conv_id, conv.get("messages", []))
+    return ConversationDetail(
+        id=conv["id"],
+        title=conv["title"],
+        created_at=conv["created_at"],
+        updated_at=conv["updated_at"],
+        messages=[_message_to_schema(m) for m in conv.get("messages", [])],
     )
 
 

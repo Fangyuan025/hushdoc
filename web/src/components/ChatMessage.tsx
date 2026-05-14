@@ -1,6 +1,8 @@
 import { useState } from "react"
 import {
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Loader2,
   RefreshCw,
@@ -42,13 +44,22 @@ interface ChatMessageProps {
   /** Optional handler for the 🔊 replay icon next to the assistant
    *  bubble. Receives the cached blob URL to re-play. */
   onReplay?: (audioUrl: string) => void
-  /** v0.2.0: regenerate this answer (re-run the same standalone query
-   *  from the user message that produced it). Falsy = button hidden. */
+  /** v0.2.0: regenerate this answer. v0.5.0 attaches the new answer
+   *  as an additional variant on the same bubble; the user navigates
+   *  between variants via the < N/M > pager. Falsy = button hidden. */
   onRegenerate?: () => void
+  /** v0.5.0: switch the active variant when the user clicks the pager
+   *  arrows. Receives the new (clamped) variant index. */
+  onSwitchVariant?: (variantIndex: number) => void
 }
 
 /** One chat bubble. Assistant supports markdown + code + GFM tables. */
-export function ChatMessage({ msg, onReplay, onRegenerate }: ChatMessageProps) {
+export function ChatMessage({
+  msg,
+  onReplay,
+  onRegenerate,
+  onSwitchVariant,
+}: ChatMessageProps) {
   const isUser = msg.role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -116,9 +127,22 @@ export function ChatMessage({ msg, onReplay, onRegenerate }: ChatMessageProps) {
 
         {/* v0.2.0 action row: regenerate / copy / replay-audio. Only
             renders on completed assistant messages so the streaming
-            bubble doesn't flicker. */}
+            bubble doesn't flicker.
+
+            v0.5.0: when the message has multiple regenerated variants,
+            also render the < N/M > pager inline so the user can flip
+            between answers. The pager is hidden while a regenerate is
+            in flight (the streaming bubble already shows the in-progress
+            variant as the active one). */}
         {showActionsRow && (
           <div className="mt-1 flex items-center gap-0.5 text-muted-foreground">
+            {msg.variants && msg.variants.length > 1 && onSwitchVariant && (
+              <VariantPager
+                count={msg.variants.length}
+                active={msg.activeVariant ?? 0}
+                onSwitch={onSwitchVariant}
+              />
+            )}
             {onRegenerate && (
               <ActionBtn
                 title="Regenerate answer"
@@ -160,10 +184,12 @@ export function ChatMessage({ msg, onReplay, onRegenerate }: ChatMessageProps) {
 function ActionBtn({
   title,
   onClick,
+  disabled,
   children,
 }: {
   title: string
   onClick: () => void
+  disabled?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -171,9 +197,47 @@ function ActionBtn({
       type="button"
       onClick={onClick}
       title={title}
-      className="rounded-md p-1 transition-colors hover:bg-accent hover:text-foreground"
+      disabled={disabled}
+      className="rounded-md p-1 transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
     >
       {children}
     </button>
+  )
+}
+
+/** v0.5.0 pager for stepping through regenerated answer variants.
+ *  Modelled on ChatGPT's "< N/M >" control: the centre label shows the
+ *  1-indexed position; arrows clamp at either end. */
+function VariantPager({
+  count,
+  active,
+  onSwitch,
+}: {
+  count: number
+  active: number
+  onSwitch: (idx: number) => void
+}) {
+  const atStart = active <= 0
+  const atEnd = active >= count - 1
+  return (
+    <div className="mr-0.5 flex items-center gap-0 rounded-md text-xs">
+      <ActionBtn
+        title="Previous answer"
+        disabled={atStart}
+        onClick={() => !atStart && onSwitch(active - 1)}
+      >
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </ActionBtn>
+      <span className="px-0.5 tabular-nums text-[11px] text-muted-foreground">
+        {active + 1}/{count}
+      </span>
+      <ActionBtn
+        title="Next answer"
+        disabled={atEnd}
+        onClick={() => !atEnd && onSwitch(active + 1)}
+      >
+        <ChevronRight className="h-3.5 w-3.5" />
+      </ActionBtn>
+    </div>
   )
 }

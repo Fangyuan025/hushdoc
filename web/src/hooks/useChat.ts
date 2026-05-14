@@ -1,7 +1,70 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiClearChat } from "@/lib/api"
 import { conversationApi } from "@/hooks/useConversations"
-import type { ChatMessage, DoneEvent, SourceDoc } from "@/types"
+import type {
+  AssistantVariant,
+  ChatMessage,
+  DoneEvent,
+  RetrievalTraceEntry,
+  SourceDoc,
+} from "@/types"
+
+/** Project a server-side `ConversationMessage` (which may carry the
+ *  v0.5.0 variants shape) into the frontend's ChatMessage. The
+ *  top-level display fields mirror the active variant so the rest of
+ *  the UI keeps working without case-splitting. */
+function projectServerMessage(
+  conversationId: string,
+  index: number,
+  m: {
+    role: string
+    content: string
+    variants?: Array<{
+      content: string
+      sources?: SourceDoc[]
+      retrieval_trace?: RetrievalTraceEntry[]
+      retrieval_mode?: string
+      standalone_question?: string
+      chitchat?: boolean
+    }>
+    active_variant?: number
+  },
+): ChatMessage {
+  const role = m.role === "assistant" ? "assistant" : "user"
+  const base: ChatMessage = {
+    id: `${conversationId}-${index}`,
+    role,
+    content: m.content,
+    serverIndex: index,
+  }
+  if (role !== "assistant" || !m.variants || m.variants.length === 0) {
+    return base
+  }
+  const variants: AssistantVariant[] = m.variants.map((v) => ({
+    content: v.content,
+    sources: v.sources,
+    standaloneQuery: v.standalone_question,
+    retrievalTrace: v.retrieval_trace,
+    retrievalMode: v.retrieval_mode,
+    chitchat: v.chitchat,
+  }))
+  const activeIdx = Math.min(
+    Math.max(0, m.active_variant ?? 0),
+    variants.length - 1,
+  )
+  const active = variants[activeIdx]
+  return {
+    ...base,
+    content: active.content,
+    sources: active.sources,
+    standaloneQuery: active.standaloneQuery,
+    retrievalTrace: active.retrievalTrace,
+    retrievalMode: active.retrievalMode,
+    chitchat: active.chitchat,
+    variants,
+    activeVariant: activeIdx,
+  }
+}
 
 /**
  * Parses an SSE byte stream from a `fetch` Response into typed events.
@@ -178,11 +241,9 @@ export function useChat({
       .then((conv) => {
         if (cancelled) return
         setMessages(
-          conv.messages.map((m, i) => ({
-            id: `${conversationId}-${i}`,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })),
+          conv.messages.map((m, i) =>
+            projectServerMessage(conversationId, i, m),
+          ),
         )
       })
       .catch((err) => {
@@ -290,7 +351,47 @@ export function useChat({
             // punctuation (e.g. last token was "...feedback").
             flushSentences(true)
             onStreamComplete?.()
-            const finalMsg: ChatMessage = {
+            // Stamp serverIndex on the new assistant message so the
+            // regenerate / switch-variant flows can address it without
+            // a refetch. The on-disk index matches our local index
+            // because we hydrate from disk on conversation switch.
+            setMessages((m) => {
+              const aiIdx = m.findIndex((msg) => msg.id === aiId)
+              const finalMsg: ChatMessage = {
+                ...aiMsg,
+                content: done.answer || "",
+                streaming: false,
+                chitchat: done.chitchat,
+                sources: done.source_documents,
+                standaloneQuery: done.standalone_question,
+                retrievalTrace: done.retrieval_trace,
+                retrievalMode: done.retrieval_mode,
+                serverIndex: aiIdx >= 0 ? aiIdx : undefined,
+                variants: [
+                  {
+                    content: done.answer || "",
+                    sources: done.source_documents,
+                    standaloneQuery: done.standalone_question,
+                    retrievalTrace: done.retrieval_trace,
+                    retrievalMode: done.retrieval_mode,
+                    chitchat: done.chitchat,
+                  },
+                ],
+                activeVariant: 0,
+              }
+              return m.map((msg) => (msg.id === aiId ? finalMsg : msg))
+            })
+            // Also stamp serverIndex on the user message (one before).
+            setMessages((m) => {
+              const aiIdx = m.findIndex((msg) => msg.id === aiId)
+              if (aiIdx <= 0) return m
+              return m.map((msg, i) =>
+                i === aiIdx - 1 && msg.role === "user"
+                  ? { ...msg, serverIndex: i }
+                  : msg,
+              )
+            })
+            onDone?.({
               ...aiMsg,
               content: done.answer || "",
               streaming: false,
@@ -299,11 +400,7 @@ export function useChat({
               standaloneQuery: done.standalone_question,
               retrievalTrace: done.retrieval_trace,
               retrievalMode: done.retrieval_mode,
-            }
-            setMessages((m) =>
-              m.map((msg) => (msg.id === aiId ? finalMsg : msg)),
-            )
-            onDone?.(finalMsg)
+            })
           } else if (ev.event === "title") {
             const tev = ev.data as { conversation_id: string; title: string }
             onTitle?.(tev.conversation_id, tev.title)
@@ -332,14 +429,297 @@ export function useChat({
     [conversationId, sessionId, scope, streaming, onDone, onSentence, onStreamComplete, onTitle],
   )
 
+  // When a regenerate is in flight, this holds the id of the assistant
+  // message being regenerated so abort handlers can roll the placeholder
+  // variant back (we don't want a partial stream to stick around as a
+  // selectable variant in the pager).
+  const regenInFlightRef = useRef<{ id: string; variantIndex: number } | null>(
+    null,
+  )
+
   const stop = useCallback(() => {
     abortRef.current?.abort()
     abortRef.current = null
     setStreaming(false)
+    // If a regenerate was in flight, drop its placeholder variant so the
+    // pager doesn't gain a half-finished entry. Otherwise just clear the
+    // streaming flag.
+    const regen = regenInFlightRef.current
+    regenInFlightRef.current = null
     setMessages((m) =>
-      m.map((msg) => (msg.streaming ? { ...msg, streaming: false } : msg)),
+      m.map((msg) => {
+        if (!msg.streaming) return msg
+        if (regen && msg.id === regen.id && msg.variants) {
+          const newVariants = msg.variants.filter(
+            (_, i) => i !== regen.variantIndex,
+          )
+          const newActive = Math.max(
+            0,
+            Math.min(regen.variantIndex - 1, newVariants.length - 1),
+          )
+          const active = newVariants[newActive]
+          return {
+            ...msg,
+            streaming: false,
+            variants: newVariants.length > 0 ? newVariants : undefined,
+            activeVariant: newVariants.length > 0 ? newActive : undefined,
+            content: active?.content ?? msg.content,
+            sources: active?.sources,
+            standaloneQuery: active?.standaloneQuery,
+            retrievalTrace: active?.retrievalTrace,
+            retrievalMode: active?.retrievalMode,
+            chitchat: active?.chitchat,
+          }
+        }
+        return { ...msg, streaming: false }
+      }),
     )
   }, [])
+
+  /** v0.5.0 regenerate: re-run the previous user question and append
+   *  the new answer as an additional variant on the same assistant
+   *  bubble. The user navigates between variants via the < N/M > pager.
+   *  The server is the source of truth for ordering; we optimistically
+   *  add a placeholder variant during streaming and finalise it on done. */
+  const regenerate = useCallback(
+    async (assistantId: string) => {
+      if (streaming) return
+      const target = messages.find((m) => m.id === assistantId)
+      if (
+        !target ||
+        target.role !== "assistant" ||
+        target.serverIndex == null ||
+        !conversationId
+      ) {
+        return
+      }
+
+      // Build an "in-progress" variant placeholder so the pager shows
+      // the new slot immediately (e.g. < 2/2 > the moment the user
+      // clicks regenerate). We also snapshot the existing variants so
+      // we can populate from the legacy single-variant shape.
+      const placeholderIndex = (target.variants?.length ?? 1)
+      regenInFlightRef.current = { id: assistantId, variantIndex: placeholderIndex }
+
+      setMessages((ms) =>
+        ms.map((msg) => {
+          if (msg.id !== assistantId) return msg
+          const existing: AssistantVariant[] = msg.variants ?? [
+            {
+              content: msg.content,
+              sources: msg.sources,
+              standaloneQuery: msg.standaloneQuery,
+              retrievalTrace: msg.retrievalTrace,
+              retrievalMode: msg.retrievalMode,
+              chitchat: msg.chitchat,
+            },
+          ]
+          const newVariants = [...existing, { content: "" } as AssistantVariant]
+          return {
+            ...msg,
+            streaming: true,
+            content: "",
+            sources: undefined,
+            standaloneQuery: undefined,
+            retrievalTrace: undefined,
+            retrievalMode: undefined,
+            chitchat: undefined,
+            variants: newVariants,
+            activeVariant: newVariants.length - 1,
+          }
+        }),
+      )
+
+      setStreaming(true)
+      setError(null)
+
+      const ac = new AbortController()
+      abortRef.current = ac
+      try {
+        const resp = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: "", // ignored by the server in regenerate mode
+            conversation_id: conversationId,
+            session_id: sessionId,
+            filenames: scope && scope.length > 0 ? scope : null,
+            regenerate: true,
+          }),
+          signal: ac.signal,
+        })
+        if (!resp.ok) throw new Error(`/api/chat -> ${resp.status}`)
+
+        for await (const ev of parseSSE(resp, ac.signal)) {
+          if (ev.event === "token") {
+            const text = (ev.data as { text: string }).text
+            setMessages((ms) =>
+              ms.map((msg) =>
+                msg.id === assistantId
+                  ? { ...msg, content: msg.content + text }
+                  : msg,
+              ),
+            )
+          } else if (ev.event === "standalone") {
+            const q = (ev.data as { query: string }).query
+            setMessages((ms) =>
+              ms.map((msg) =>
+                msg.id === assistantId
+                  ? { ...msg, standaloneQuery: q }
+                  : msg,
+              ),
+            )
+          } else if (ev.event === "sources") {
+            const docs = (ev.data as { docs: SourceDoc[] }).docs
+            setMessages((ms) =>
+              ms.map((msg) =>
+                msg.id === assistantId ? { ...msg, sources: docs } : msg,
+              ),
+            )
+          } else if (ev.event === "done") {
+            const done = ev.data as DoneEvent
+            setMessages((ms) =>
+              ms.map((msg) => {
+                if (msg.id !== assistantId || !msg.variants) return msg
+                const idx = msg.activeVariant ?? msg.variants.length - 1
+                const newVariants = msg.variants.map((v, i) =>
+                  i === idx
+                    ? {
+                        content: done.answer || "",
+                        sources: done.source_documents,
+                        standaloneQuery: done.standalone_question,
+                        retrievalTrace: done.retrieval_trace,
+                        retrievalMode: done.retrieval_mode,
+                        chitchat: done.chitchat,
+                      }
+                    : v,
+                )
+                return {
+                  ...msg,
+                  streaming: false,
+                  content: done.answer || "",
+                  chitchat: done.chitchat,
+                  sources: done.source_documents,
+                  standaloneQuery: done.standalone_question,
+                  retrievalTrace: done.retrieval_trace,
+                  retrievalMode: done.retrieval_mode,
+                  variants: newVariants,
+                }
+              }),
+            )
+            onDone?.({
+              id: assistantId,
+              role: "assistant",
+              content: done.answer || "",
+            })
+          } else if (ev.event === "error") {
+            const errMsg =
+              (ev.data as { message?: string }).message || "stream error"
+            throw new Error(errMsg)
+          }
+          // 'variant_done' is informational; the 'done' path above
+          // already wired up state. We forward it onward in case future
+          // consumers want it, but for now it's a no-op.
+        }
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return
+        const msg = err instanceof Error ? err.message : String(err)
+        setError(msg)
+        // Roll back the placeholder variant on failure so the pager
+        // doesn't end up showing an empty bubble.
+        const regen = regenInFlightRef.current
+        setMessages((ms) =>
+          ms.map((m2) => {
+            if (m2.id !== assistantId || !m2.variants) return m2
+            const drop =
+              regen && regen.id === assistantId
+                ? regen.variantIndex
+                : m2.variants.length - 1
+            const filtered = m2.variants.filter((_, i) => i !== drop)
+            const newActive = Math.max(
+              0,
+              Math.min(drop - 1, filtered.length - 1),
+            )
+            const active = filtered[newActive]
+            return {
+              ...m2,
+              streaming: false,
+              variants: filtered.length > 0 ? filtered : undefined,
+              activeVariant: filtered.length > 0 ? newActive : undefined,
+              content: active?.content ?? `❌ ${msg}`,
+              sources: active?.sources,
+              standaloneQuery: active?.standaloneQuery,
+              retrievalTrace: active?.retrievalTrace,
+              retrievalMode: active?.retrievalMode,
+              chitchat: active?.chitchat,
+            }
+          }),
+        )
+      } finally {
+        setStreaming(false)
+        abortRef.current = null
+        regenInFlightRef.current = null
+      }
+    },
+    [conversationId, messages, sessionId, scope, streaming, onDone],
+  )
+
+  /** v0.5.0 pager: switch which variant of an assistant message is
+   *  displayed. Optimistically updates local state, then PATCHes the
+   *  server so the chain's chat history (used by the rewriter on the
+   *  next turn) mirrors the user's choice. */
+  const switchVariant = useCallback(
+    async (assistantId: string, variantIndex: number) => {
+      const target = messages.find((m) => m.id === assistantId)
+      if (
+        !target ||
+        target.role !== "assistant" ||
+        !target.variants ||
+        target.serverIndex == null ||
+        !conversationId
+      ) {
+        return
+      }
+      const clamped = Math.max(
+        0,
+        Math.min(variantIndex, target.variants.length - 1),
+      )
+      if (clamped === target.activeVariant) return
+
+      const active = target.variants[clamped]
+      setMessages((ms) =>
+        ms.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                activeVariant: clamped,
+                content: active.content,
+                sources: active.sources,
+                standaloneQuery: active.standaloneQuery,
+                retrievalTrace: active.retrievalTrace,
+                retrievalMode: active.retrievalMode,
+                chitchat: active.chitchat,
+              }
+            : m,
+        ),
+      )
+
+      try {
+        await conversationApi.setActiveVariant(
+          conversationId,
+          target.serverIndex,
+          clamped,
+        )
+      } catch (err) {
+        // Surface the error but leave the optimistic state in place --
+        // the user's pick is still valid client-side, only the chain
+        // history failed to update. Worst case the next turn sees a
+        // slightly off-base prior reply.
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [conversationId, messages],
+  )
 
   const clear = useCallback(async () => {
     stop()
@@ -365,5 +745,15 @@ export function useChat({
     [],
   )
 
-  return { messages, send, stop, clear, streaming, error, patchMessage }
+  return {
+    messages,
+    send,
+    stop,
+    clear,
+    streaming,
+    error,
+    patchMessage,
+    regenerate,
+    switchVariant,
+  }
 }

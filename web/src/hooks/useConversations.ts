@@ -16,10 +16,32 @@ export interface ConversationMeta {
   message_count: number
 }
 
+/** v0.5.0: one regenerated version of an assistant turn, as returned
+ *  by the server. Mirrors `server/schemas.MessageVariant`. */
+export interface ServerVariant {
+  content: string
+  ts?: number
+  sources?: Array<{
+    filename: string
+    page: number | null
+    headings: string
+    snippet: string
+  }>
+  retrieval_trace?: unknown[]
+  retrieval_mode?: string
+  standalone_question?: string
+  chitchat?: boolean
+  error?: string
+}
+
 export interface ConversationMessage {
   role: "user" | "assistant"
   content: string
   ts?: number
+  /** v0.5.0: multi-variant assistant turns. Absent / empty array
+   *  means single-variant (the legacy shape). */
+  variants?: ServerVariant[]
+  active_variant?: number
 }
 
 export interface ConversationDetail {
@@ -75,6 +97,26 @@ async function apiRenameConversation(
   return r.json()
 }
 
+/** v0.5.0: switch which variant of an assistant message is 'live'.
+ *  The server rehydrates the chain's chat history so the next turn
+ *  builds on the chosen variant. Returns the updated conversation. */
+async function apiSetActiveVariant(
+  conversationId: string,
+  messageIndex: number,
+  variantIndex: number,
+): Promise<ConversationDetail> {
+  const r = await fetch(
+    `${BASE}/conversations/${conversationId}/messages/${messageIndex}/active_variant`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ variant_index: variantIndex }),
+    },
+  )
+  if (!r.ok) throw new Error(`set_active_variant -> ${r.status}`)
+  return r.json()
+}
+
 /** Sidebar conversation-list state. The SSE `title` event the backend
  *  emits after the first turn updates the title in place; everywhere
  *  else, the list refetches when needed. */
@@ -127,4 +169,5 @@ export const conversationApi = {
   create: apiCreateConversation,
   delete: apiDeleteConversation,
   rename: apiRenameConversation,
+  setActiveVariant: apiSetActiveVariant,
 }

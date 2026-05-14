@@ -75,6 +75,22 @@ export interface DoneEvent {
   retrieval_trace?: RetrievalTraceEntry[]
   /** v0.2.0+: 'topk' | 'topk+rerank' | 'balanced' | 'balanced+rerank' | ''. */
   retrieval_mode?: string
+  /** v0.5.0 regenerate: index into conv["messages"] of the assistant
+   *  bubble the new variant attaches to. Absent on non-regenerate turns. */
+  regenerated_message_index?: number
+}
+
+/** v0.5.0: one regenerated version of an assistant turn. Lives in the
+ *  ChatMessage.variants array; the user flips between them in the
+ *  < N/M > pager and the chain history uses whichever index matches
+ *  ChatMessage.activeVariant. */
+export interface AssistantVariant {
+  content: string
+  chitchat?: boolean
+  sources?: SourceDoc[]
+  standaloneQuery?: string
+  retrievalTrace?: RetrievalTraceEntry[]
+  retrievalMode?: string
 }
 
 export interface ChatMessage {
@@ -95,4 +111,15 @@ export interface ChatMessage {
   retrievalTrace?: RetrievalTraceEntry[]
   /** v0.2.0+: 'topk', 'topk+rerank', etc. — surfaced as a small badge. */
   retrievalMode?: string
+  /** v0.5.0: index of this message inside its conversation's messages
+   *  array. Used by regenerate / switch-variant to address the right
+   *  assistant bubble on the server. Only present for messages loaded
+   *  from the persistence layer, not for in-flight optimistic ones. */
+  serverIndex?: number
+  /** v0.5.0: regenerated answers stored alongside the original. Empty
+   *  or single-element arrays render no pager. */
+  variants?: AssistantVariant[]
+  /** v0.5.0: index into variants[] currently rendered. The other
+   *  display fields (content / sources / etc.) mirror this variant. */
+  activeVariant?: number
 }

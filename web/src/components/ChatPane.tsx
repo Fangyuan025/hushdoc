@@ -78,22 +78,31 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
       [voice],
     )
 
-    const { messages, send, stop, clear, streaming, error, patchMessage } =
-      useChat({
-        conversationId,
-        scope,
-        onDone,
-        // Sentence-by-sentence streaming TTS: enqueue each completed
-        // sentence to the voice worker as soon as it lands. Audio
-        // starts playing while the rest of the answer is still being
-        // generated, eliminating the 5-15s gap of dead air the old
-        // "synthesise after done" approach left.
-        onSentence: voice.feedStreamingTTS,
-        onStreamComplete: voice.finishStreamingTTS,
-        onTitle: onTitleEvent,
-        skipHydrationFor,
-        onHydrationConsumed,
-      })
+    const {
+      messages,
+      send,
+      stop,
+      clear,
+      streaming,
+      error,
+      patchMessage,
+      regenerate,
+      switchVariant,
+    } = useChat({
+      conversationId,
+      scope,
+      onDone,
+      // Sentence-by-sentence streaming TTS: enqueue each completed
+      // sentence to the voice worker as soon as it lands. Audio
+      // starts playing while the rest of the answer is still being
+      // generated, eliminating the 5-15s gap of dead air the old
+      // "synthesise after done" approach left.
+      onSentence: voice.feedStreamingTTS,
+      onStreamComplete: voice.finishStreamingTTS,
+      onTitle: onTitleEvent,
+      skipHydrationFor,
+      onHydrationConsumed,
+    })
 
     const attachAudioRef = useRef<(id: string, url: string) => void>(
       patchMessage,
@@ -155,23 +164,17 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
       if (text) await sendWithCancel(text)
     }, [voice, sendWithCancel])
 
-    // Regenerate: re-run the most recent USER question that produced
-    // an assistant message. Walks backwards from the clicked assistant
-    // msg to its preceding user message; if found, fires sendWithCancel
-    // with the same text (the chain handles dedup / new conversation
-    // history naturally because this is just another turn).
+    // v0.5.0 regenerate: instead of replaying the user message as a
+    // brand-new turn (which appended a duplicate Q/A pair), we now ask
+    // the backend to append a *variant* on the same assistant bubble.
+    // The hook owns the optimistic placeholder + streaming + final
+    // variant write; we just stop any in-flight TTS first.
     const regenerateFor = useCallback(
       (assistantId: string) => {
-        const idx = messages.findIndex((m) => m.id === assistantId)
-        if (idx <= 0) return
-        for (let i = idx - 1; i >= 0; i--) {
-          if (messages[i].role === "user") {
-            void sendWithCancel(messages[i].content)
-            return
-          }
-        }
+        voice.stopPlayback()
+        void regenerate(assistantId)
       },
-      [messages, sendWithCancel],
+      [regenerate, voice],
     )
 
     return (
@@ -189,6 +192,11 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
                   onRegenerate={
                     msg.role === "assistant"
                       ? () => regenerateFor(msg.id)
+                      : undefined
+                  }
+                  onSwitchVariant={
+                    msg.role === "assistant"
+                      ? (idx) => void switchVariant(msg.id, idx)
                       : undefined
                   }
                 />

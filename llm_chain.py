@@ -789,12 +789,25 @@ class RAGChain:
         """Replace the in-memory chat history for ``session_id`` with the
         given list of ``{role, content}`` dicts. Used to load a saved
         conversation from disk so the rewriter / chat memory carry the
-        right context across server restarts."""
+        right context across server restarts.
+
+        v0.5.0: assistant messages may be in variants shape; we project
+        to the active variant's content so the chain only ever sees a
+        flat ``{role, content}`` history."""
         history = self._get_session_history(session_id)
         history.clear()
         for m in messages:
             role = m.get("role")
-            content = m.get("content") or ""
+            if role == "assistant" and isinstance(m.get("variants"), list):
+                variants = m["variants"] or []
+                if not variants:
+                    continue
+                idx = m.get("active_variant", 0)
+                if not isinstance(idx, int) or idx < 0 or idx >= len(variants):
+                    idx = 0
+                content = (variants[idx].get("content") or "")
+            else:
+                content = m.get("content") or ""
             if not content:
                 continue
             if role == "user":

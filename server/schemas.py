@@ -97,6 +97,13 @@ class ChatRequest(BaseModel):
         description="Restrict retrieval to these source files. None / empty "
                     "means search the whole vector store.",
     )
+    # v0.5.0 multi-variant regenerate. When true, the request re-generates
+    # a fresh answer for the *previous* user turn (it doesn't append a new
+    # user message). The new answer becomes a new variant attached to the
+    # tail assistant message; the user can flip between variants in the
+    # pager. ``question`` is ignored in this mode -- we use the last user
+    # message stored in the conversation instead.
+    regenerate: bool = False
 
 
 class ChatClearRequest(BaseModel):
@@ -122,10 +129,30 @@ class ConversationsListResponse(BaseModel):
     conversations: List[ConversationMeta]
 
 
-class ConversationMessage(BaseModel):
-    role: str
+class MessageVariant(BaseModel):
+    """v0.5.0: one regenerated version of an assistant turn. The
+    frontend renders these in the < N/M > pager and treats whichever
+    matches ``active_variant`` as the live reply."""
     content: str
     ts: Optional[float] = None
+    sources: Optional[List[Dict]] = None
+    retrieval_trace: Optional[List[Dict]] = None
+    retrieval_mode: Optional[str] = None
+    standalone_question: Optional[str] = None
+    chitchat: Optional[bool] = None
+    error: Optional[str] = None
+
+
+class ConversationMessage(BaseModel):
+    role: str
+    # ``content`` is the legacy flat field. For assistant messages in
+    # v0.5.0 it mirrors the *active variant's* content so old clients
+    # keep working; new clients should prefer ``variants`` +
+    # ``active_variant`` and render the pager.
+    content: str
+    ts: Optional[float] = None
+    variants: Optional[List[MessageVariant]] = None
+    active_variant: Optional[int] = None
 
 
 class ConversationDetail(BaseModel):
@@ -142,6 +169,13 @@ class CreateConversationRequest(BaseModel):
 
 class RenameConversationRequest(BaseModel):
     title: str
+
+
+class SetActiveVariantRequest(BaseModel):
+    """PATCH body for switching which variant of an assistant message
+    is 'live'. The active variant is what later turns see as the prior
+    assistant reply, so flipping this also flips chain history."""
+    variant_index: int
 
 
 # ---------------------------------------------------------------------------
