@@ -4,6 +4,99 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.5.0] — 2026-05-14
+
+Find the right chunk, prove it visually. v0.5.0 is a retrieval-quality
++ trust release: faster embedding on machines with a GPU, a wider doc
+format (EPUB), a sparse channel alongside the dense one (BM25 + RRF),
+multi-variant regenerate so you can compare answers, persistent
+session-chunk memory across backend restarts, and a PDF citation
+viewer that opens the cited page and highlights the chunk text in
+place.
+
+### Added — GPU embedding auto-detect
+Embedding model + cross-encoder reranker now use CUDA when available,
+CPU otherwise. Honors `HUSHDOC_EMBED_DEVICE=cpu|cuda` override.
+Pre-v0.5.0 was hardcoded CPU even when a perfectly good GPU was idle
+right next to the llama-server.
+
+### Added — EPUB ingest
+Drop a `.epub` into the Library and it lands in the index just like a
+PDF. Docling 2.x doesn't speak EPUB natively, so ingest uses an
+in-house path: read the container.xml to find the OPF, walk the spine
+in order, BeautifulSoup the XHTML, drop `<script>` / `<style>`,
+chapter number becomes the `page` field. Citation regex was extended
+so inline `[file.epub p.3]` works.
+
+### Added — persistent session chunk memory
+v0.4.0's rolling-chunk window (the +memory(N) retrieval boost) used
+to die on backend restart, which meant the first follow-up after
+a server reboot lost the same context the boost was designed to
+protect. Now the window is exported into `chat_history/<id>.json`
+after every turn and rehydrated on startup; chunks whose source file
+was deleted between sessions get filtered out so we don't carry
+stale citations.
+
+### Added — multi-variant regenerate
+Regenerate no longer duplicates the Q/A pair on every press. Instead
+it attaches the new answer as another variant to the same assistant
+bubble, navigable via a `< N/M >` pager (mirrors ChatGPT's design).
+Variants are persisted, so flipping between them after a restart
+works. Switching the active variant also rehydrates the chain's
+chat-history so the rewriter on the next turn sees the chosen reply
+as the prior assistant message.
+
+Backend: `AssistantVariant` TypedDict, `append_variant` /
+`set_active_variant` store ops, `ChatRequest.regenerate` flag, new
+`PATCH /api/conversations/{id}/messages/{i}/active_variant` endpoint,
+`variant_done` SSE event with the new variant index.
+
+Frontend: `regenerate(id)` optimistically pushes a placeholder
+variant, streams into it, finalises on done, rolls back on abort.
+`switchVariant(id, idx)` flips local state then PATCHes the server.
+
+### Added — hybrid retrieval (BM25 + dense + RRF)
+Dense vector search alone misses exact-name / exact-number queries
+(filenames, model versions, error codes). New `bm25_index.py` runs a
+pure-Python BM25 over the same chunk corpus Chroma holds; results
+fuse with dense candidates via Reciprocal Rank Fusion (rrf_k=60).
+Mode selectable via `HUSHDOC_RETRIEVAL_MODE=hybrid|dense|bm25`,
+default `hybrid`. Each candidate is tagged with its source channel
+(`dense` / `bm25` / `both` / `memory` for carry-overs) which shows
+up in the Retrieval-trace drawer as a coloured chip.
+
+### Added — PDF citation viewer
+Clicking "open" on a Sources card mounts a fullscreen pdf.js viewer
+on the cited page. The chunk's text is fuzzy-matched against the
+rendered text layer and translucent highlights paint over the
+matched spans; the first hit scrolls into view automatically. Page
+navigation (arrows + page input) and zoom (50%-200%) live in the
+top bar.
+
+- `GET /api/documents/{filename}/raw` serves the original bytes
+  from `./data/uploads/` with path-traversal hardening (only
+  `Path(filename).name` resolved inside the upload root is served).
+- `FileMeta.has_raw` tells the UI which Library rows can open in
+  the viewer (PDFs only today; pasted / typed items stay snippet-
+  only).
+- `web/src/lib/pdf-highlight.ts`: tiered fuzzy matcher (whole
+  chunk → 80/60/40/24-char sliding windows) with hyphenated
+  line-break repair, whitespace collapse, and case folding.
+  `web/tests/pdf-highlight.test.mjs` is a 7-case smoke test
+  covering the regress-prone cases.
+
+### Migration notes
+- Existing `chat_history/<id>.json` files load fine. Assistant
+  messages get lifted into the variants shape on first read; the
+  on-disk format stays consistent after the next write.
+- BM25 corpus is in-memory and rebuilds itself from Chroma on
+  first hybrid query of each process; no migration step required.
+- `pdfjs-dist` adds ~1.3MB to the worker bundle (lazy-loaded, only
+  fetched when the viewer mounts). Total `dist/` payload is now
+  ~1.3MB JS + ~92KB CSS + KaTeX fonts.
+- `rank-bm25>=0.2.2` is a new Python dependency (pure-Python,
+  ~9KB wheel).
+
 ## [0.4.0] — 2026-05-13
 
 Multi-turn follow-ups now work. Reported pain point: in a single
