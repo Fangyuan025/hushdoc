@@ -369,6 +369,9 @@ function TraceRow({ entry }: { entry: RetrievalTraceEntry }) {
         <span className="text-muted-foreground">
           p.{entry.page ?? "?"}
         </span>
+        {entry.source && (
+          <SourceChannelChip channel={entry.source} />
+        )}
         <span
           className={cn(
             "ml-auto text-[10px] uppercase tracking-wide",
@@ -397,5 +400,54 @@ function TraceRow({ entry }: { entry: RetrievalTraceEntry }) {
         </div>
       )}
     </div>
+  )
+}
+
+/** v0.5.0: tag the retrieval channel that surfaced this candidate.
+ *  Hybrid mode produces 'dense' / 'bm25' / 'both'; the colour cue helps
+ *  the user spot at a glance which channel is pulling its weight on a
+ *  given query (e.g. an exact-name query should be mostly 'bm25 / both'). */
+function SourceChannelChip({ channel }: { channel: string }) {
+  const lower = channel.toLowerCase()
+  if (!lower || lower === "dense") {
+    // Most common case for dense-only modes -- skip the chip to keep
+    // the row uncluttered.
+    if (lower === "dense") {
+      return (
+        <span className="rounded bg-sky-500/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-sky-600 dark:text-sky-300">
+          dense
+        </span>
+      )
+    }
+    return null
+  }
+  if (lower === "bm25") {
+    return (
+      <span className="rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-300">
+        bm25
+      </span>
+    )
+  }
+  if (lower === "both") {
+    return (
+      <span className="rounded bg-emerald-500/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+        both
+      </span>
+    )
+  }
+  if (lower === "memory") {
+    return (
+      <span
+        className="rounded bg-violet-500/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300"
+        title="Carried over from a previous turn in this conversation"
+      >
+        memory
+      </span>
+    )
+  }
+  return (
+    <span className="rounded bg-muted px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+      {channel}
+    </span>
   )
 }

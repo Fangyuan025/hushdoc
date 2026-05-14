@@ -62,6 +62,10 @@ export interface RetrievalTraceEntry {
   /** Set after the answer streams: true iff this candidate's (filename, page)
    *  was inline-cited by the model. */
   cited?: boolean
+  /** v0.5.0: which retrieval channel surfaced this candidate.
+   *  'dense' / 'bm25' / 'both' for hybrid runs; '' or 'dense' for the
+   *  legacy dense-only modes. Rendered as a small chip in the trace tab. */
+  source?: string
 }
 
 export interface DoneEvent {

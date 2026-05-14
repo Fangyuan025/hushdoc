@@ -957,19 +957,66 @@ class RAGChain:
                 else self.k
             )
 
-            # Balanced retrieval whenever 2+ docs are in play. Keeps a single
-            # semantically-dominant doc from crowding out the rest, which
-            # otherwise makes 'what's common between the two' or 'which one
-            # is about X' unanswerable.
-            if len(effective_scope) >= 2:
+            # v0.5.0: retrieval mode is configurable via
+            # HUSHDOC_RETRIEVAL_MODE. 'hybrid' (BM25 + dense + RRF) is
+            # the default. 'dense' restores the v0.4.x behaviour
+            # (balanced when multi-doc, topk otherwise). 'bm25' is pure
+            # keyword -- useful for exact-name / exact-code queries
+            # where the embedding model is blind. Per-candidate
+            # provenance ('dense' / 'bm25' / 'both') is stashed in the
+            # ``_rrf_source`` metadata field so the trace tab can show
+            # which channel found each chunk.
+            retrieval_mode_env = os.environ.get(
+                "HUSHDOC_RETRIEVAL_MODE", "hybrid",
+            ).strip().lower()
+            if retrieval_mode_env not in {"hybrid", "dense", "bm25"}:
+                retrieval_mode_env = "hybrid"
+
+            if retrieval_mode_env == "bm25":
+                candidates = self.vector_store.similarity_search_bm25(
+                    query, k=candidate_k, filenames=filenames,
+                )
+                for d in candidates:
+                    (d.metadata or {}).setdefault("_rrf_source", "bm25")
+                base_mode = "bm25"
+            elif retrieval_mode_env == "hybrid":
+                # Hybrid runs dense + BM25 over the full effective scope
+                # (no balanced split -- the BM25 channel naturally
+                # surfaces hits from rarely-mentioned docs that dense
+                # would drown out). For single-doc scopes that's
+                # equivalent to plain hybrid; for multi-doc it's
+                # actually a stronger anti-crosstalk signal than the
+                # balanced dense-only path.
+                fused = self.vector_store.similarity_search_hybrid(
+                    query, k=candidate_k, filenames=filenames,
+                )
+                candidates = []
+                for doc, ranks in fused:
+                    dense_rank, bm25_rank = ranks[0], ranks[1]
+                    if dense_rank and bm25_rank:
+                        source = "both"
+                    elif dense_rank:
+                        source = "dense"
+                    else:
+                        source = "bm25"
+                    if doc.metadata is None:
+                        doc.metadata = {}
+                    doc.metadata["_rrf_source"] = source
+                    candidates.append(doc)
+                base_mode = "hybrid"
+            elif len(effective_scope) >= 2:
                 candidates = self.vector_store.similarity_search_balanced(
                     query, k=candidate_k, filenames=effective_scope,
                 )
+                for d in candidates:
+                    (d.metadata or {}).setdefault("_rrf_source", "dense")
                 base_mode = "balanced"
             else:
                 candidates = self.vector_store.similarity_search(
                     query, k=candidate_k, filenames=filenames,
                 )
+                for d in candidates:
+                    (d.metadata or {}).setdefault("_rrf_source", "dense")
                 base_mode = "topk"
 
             # v0.4.0: mix in chunks the chain selected on previous turns of
@@ -1003,6 +1050,13 @@ class RAGChain:
                         # chunks from the previous (different) scope.
                         if filenames and d.metadata.get("filename") not in filenames:
                             continue
+                        # Tag carry-over so the trace tab can show "this
+                        # chunk came from a previous turn's selection,
+                        # not from this turn's retrieval channels."
+                        if d.metadata is None:
+                            d.metadata = {}
+                        d.metadata = dict(d.metadata)
+                        d.metadata["_rrf_source"] = "memory"
                         candidates.append(d)
                         seen.add(key)
                         added += 1

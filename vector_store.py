@@ -21,6 +21,8 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
+from bm25_index import BM25Index, reciprocal_rank_fusion
+
 logger = logging.getLogger("vector_store")
 if not logger.handlers:
     logging.basicConfig(
@@ -92,6 +94,12 @@ class LocalVectorStore:
 
         self._embeddings = self._init_embeddings()
         self._store = self._init_store()
+        # v0.5.0: BM25 index for hybrid retrieval. We materialise it
+        # lazily from whatever's already in Chroma so cold starts after
+        # an `ingest` run still have keyword-search working without an
+        # explicit reindex command.
+        self._bm25 = BM25Index()
+        self._bm25_loaded_from_chroma = False
 
     # --------------------------------------------------------------- builders
     @staticmethod
@@ -194,6 +202,15 @@ class LocalVectorStore:
             logger.exception("Chroma upsert failed.")
             raise RuntimeError("Failed to upsert documents into Chroma.") from exc
 
+        # Keep BM25 in lockstep. If we never materialised it from
+        # Chroma, mark this batch as our seed (the next search will
+        # discover the gap and refill the rest). The lazy-rebuild model
+        # in BM25Index batches the actual BM25Okapi construction.
+        try:
+            self._bm25.add_documents(clean_docs)
+        except Exception:
+            logger.exception("BM25 add_documents failed (continuing).")
+
         logger.info("Upserted %d chunks into Chroma.", len(clean_docs))
         return ids
 
@@ -220,6 +237,8 @@ class LocalVectorStore:
             logger.warning("Chroma collection '%s' deleted.", self.config.collection_name)
         finally:
             self._store = self._init_store()
+            self._bm25.reset()
+            self._bm25_loaded_from_chroma = False
 
     # -------------------------------------------------------------- retrieval
     @staticmethod
@@ -401,6 +420,14 @@ class LocalVectorStore:
         the number of chunks removed (best-effort; -1 on failure)."""
         if not filename:
             return 0
+        # Keep BM25 in lockstep. We do this BEFORE touching Chroma so a
+        # Chroma failure leaves both halves dirty -- safer than the
+        # opposite order, where Chroma succeeds and the BM25 corpus is
+        # stale on the next query.
+        try:
+            self._bm25.delete_by_filename(filename)
+        except Exception:
+            logger.exception("BM25 delete_by_filename failed (continuing).")
         try:
             # Chroma's delete-by-where: passes metadata filter directly.
             # We have to count first because delete() doesn't report n.
@@ -432,6 +459,93 @@ class LocalVectorStore:
                     return -1
             logger.exception("delete_by_filename failed for %s.", filename)
             return -1
+
+    # -------------------------------------------------------------- BM25
+    def _ensure_bm25_loaded(self) -> None:
+        """Cold-start materialisation of the BM25 corpus from Chroma.
+
+        Runs once per LocalVectorStore instance. We pull every chunk's
+        text + metadata in a single ``collection.get()`` call rather
+        than re-tokenising on the embedding side. The actual BM25Okapi
+        build happens lazily inside ``BM25Index`` on the next query,
+        so a process that never uses hybrid retrieval never pays the
+        build cost."""
+        if self._bm25_loaded_from_chroma:
+            return
+        try:
+            def _get():
+                return self._store._collection.get(  # noqa: SLF001
+                    include=["documents", "metadatas"],
+                )
+            try:
+                data = _get()
+            except Exception as exc:
+                if any(h in str(exc).lower() for h in self._TRANSIENT_HINTS):
+                    self._refresh_store()
+                    data = _get()
+                else:
+                    raise
+            docs = data.get("documents", []) or []
+            metas = data.get("metadatas", []) or []
+            rebuilt = [
+                Document(page_content=t or "", metadata=m or {})
+                for t, m in zip(docs, metas)
+            ]
+            self._bm25.rebuild_from(rebuilt)
+        except Exception:
+            logger.exception("BM25 cold-start materialisation failed.")
+        finally:
+            # Even on failure, flip the flag so we don't loop forever
+            # retrying on every query. Next ingest will populate it.
+            self._bm25_loaded_from_chroma = True
+
+    def similarity_search_bm25(
+        self,
+        query: str,
+        k: int = 6,
+        filenames: Optional[Sequence[str]] = None,
+    ) -> List[Document]:
+        """Pure BM25 top-k. Materialises the corpus from Chroma on first
+        call. Returned in score order (best first); the score itself is
+        discarded since callers downstream only care about ordering."""
+        self._ensure_bm25_loaded()
+        hits = self._bm25.search(query, k=k, filenames=filenames)
+        return [doc for doc, _score in hits]
+
+    def similarity_search_hybrid(
+        self,
+        query: str,
+        k: int = 6,
+        filenames: Optional[Sequence[str]] = None,
+        over_fetch: int = 3,
+    ) -> List[Tuple[Document, List[int]]]:
+        """v0.5.0: hybrid retrieval = dense + BM25 fused via Reciprocal
+        Rank Fusion. ``over_fetch`` controls how many candidates each
+        channel returns BEFORE the fusion picks the top-k -- 3x the
+        final budget gives RRF enough variety to surface chunks that
+        only one channel ranked well.
+
+        Returns ``[(Document, [dense_rank, bm25_rank]), ...]`` -- the
+        rank pair lets the caller tag each entry's retrieval trace
+        with which channel(s) surfaced it ('dense' / 'bm25' / 'both')."""
+        self._ensure_bm25_loaded()
+        candidate_k = max(k * over_fetch, k + 4)
+        # Dense channel — reuse the existing retry-aware path.
+        dense = self.similarity_search(query, k=candidate_k, filenames=filenames)
+        # BM25 channel.
+        bm25_hits = self._bm25.search(
+            query, k=candidate_k, filenames=filenames,
+        )
+        bm25 = [doc for doc, _ in bm25_hits]
+        fused = reciprocal_rank_fusion([dense, bm25], k=k)
+        out: List[Tuple[Document, List[int]]] = []
+        for doc, _score, ranks in fused:
+            out.append((doc, ranks))
+        logger.info(
+            "Hybrid retrieval: dense=%d, bm25=%d, fused=%d (k=%d).",
+            len(dense), len(bm25), len(out), k,
+        )
+        return out
 
     def similarity_search_balanced(
         self,

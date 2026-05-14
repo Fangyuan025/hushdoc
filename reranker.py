@@ -107,6 +107,11 @@ def rerank_with_trace(
 
     def _entry(idx: int, d: Document) -> dict:
         m = d.metadata or {}
+        # v0.5.0: ``source`` carries which retrieval channel surfaced
+        # this candidate -- 'dense' / 'bm25' / 'both' for hybrid runs,
+        # or the static fallback set by the chain for dense-only modes.
+        # The trace panel renders it as a small chip next to filename.
+        source = m.get("_rrf_source", "")
         return {
             "filename": m.get("filename", ""),
             "page": m.get("page"),
@@ -115,6 +120,7 @@ def rerank_with_trace(
             "rank_before": idx,
             "rank_after": None,
             "score_after": None,
+            "source": source,
         }
 
     trace = [_entry(i, d) for i, d in enumerate(docs)]
