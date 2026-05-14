@@ -464,6 +464,13 @@ async def chat(req: ChatRequest):
         # rewriter and follow-up boost see the right context even after
         # a server restart.
         chain.hydrate_session(memory_key, conv_before.get("messages", []))
+        # v0.5.0: also restore the rolling chunk window so the +memory(N)
+        # retrieval boost works on the FIRST turn after a backend restart.
+        # Stale chunks (their doc was deleted between sessions) are dropped
+        # inside preload_session_memory.
+        chain.preload_session_memory(
+            memory_key, conv_before.get("recent_chunks", []) or [],
+        )
 
     events = chain.stream(
         req.question,
@@ -497,6 +504,16 @@ async def chat(req: ChatRequest):
                         {"role": "assistant", "content": final_answer},
                     ],
                 )
+                # v0.5.0: persist the chain's rolling chunk window
+                # alongside the messages so a backend restart preserves
+                # the +memory(N) follow-up boost. No-op when the chain
+                # didn't select any chunks (chitchat turns, empty index).
+                try:
+                    mem = chain.export_session_memory(memory_key)
+                    if mem:
+                        conv_store.set_recent_chunks(req.conversation_id, mem)
+                except Exception:
+                    logger.exception("Failed to persist session memory.")
                 # Auto-title on the very first turn (now exactly 2 msgs).
                 refreshed = conv_store.get(req.conversation_id) or {}
                 msg_count = len(refreshed.get("messages", []))

@@ -671,6 +671,64 @@ class RAGChain:
             return []
         return list(self._session_chunks.get(session_id, []))
 
+    def export_session_memory(self, session_id: str) -> List[Dict]:
+        """v0.5.0: serialise the rolling chunk window for persistence.
+        Each chunk becomes a flat dict {filename, chunk_index,
+        page_content, metadata} so it round-trips through
+        ConversationStore.set_recent_chunks → JSON → preload at
+        backend restart. Items keep their deque order (oldest first)."""
+        if not session_id:
+            return []
+        dq = self._session_chunks.get(session_id)
+        if not dq:
+            return []
+        out: List[Dict] = []
+        for d in dq:
+            md = dict(d.metadata or {})
+            out.append({
+                "page_content": d.page_content,
+                "metadata": md,
+            })
+        return out
+
+    def preload_session_memory(
+        self, session_id: str, items: List[Dict],
+    ) -> None:
+        """v0.5.0: restore a previously-exported rolling chunk window
+        (typically pulled out of a conv JSON at backend boot). Chunks
+        whose filename is no longer in the vector store are silently
+        dropped -- the user might have deleted that doc between
+        sessions, in which case carrying its chunks across would
+        produce stale citations."""
+        if not session_id or not items:
+            return
+        from collections import deque
+        try:
+            live_files = set(self.vector_store.list_filenames())
+        except Exception:
+            live_files = set()
+        restored: List[Document] = []
+        for it in items[-self._SESSION_CHUNK_MAX:]:
+            if not isinstance(it, dict):
+                continue
+            md = it.get("metadata") or {}
+            fn = md.get("filename")
+            if live_files and fn not in live_files:
+                continue
+            page_content = it.get("page_content") or ""
+            if not page_content:
+                continue
+            restored.append(Document(page_content=page_content, metadata=md))
+        if not restored:
+            return
+        self._session_chunks[session_id] = deque(
+            restored, maxlen=self._SESSION_CHUNK_MAX,
+        )
+        logger.info(
+            "Restored %d recent-turn chunks for session %s.",
+            len(restored), session_id,
+        )
+
     def _remember_session_chunks(
         self, session_id: str, docs: List[Document],
     ) -> None:

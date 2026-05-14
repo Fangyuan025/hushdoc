@@ -45,6 +45,12 @@ class ConvMeta(TypedDict, total=False):
 
 class Conversation(ConvMeta, total=False):
     messages: List[ConvMessage]
+    # v0.5.0: rolling window of last-N chunks the chain selected on
+    # prior turns of this conversation. Mixed into the candidate pool
+    # by the chain's _retrieve on follow-ups; bounded to ~12 entries
+    # so a long convo doesn't fill the file. Items are flattened
+    # Document dicts (filename / chunk_index / page_content / metadata).
+    recent_chunks: List[Dict]
 
 
 @dataclass
@@ -158,6 +164,22 @@ class ConversationStore:
             m.setdefault("ts", now)
             conv["messages"].append(m)
         conv["updated_at"] = now
+        self._write_conv(conv)
+        return conv
+
+    def set_recent_chunks(
+        self,
+        conv_id: str,
+        chunks: List[Dict],
+    ) -> Optional[Conversation]:
+        """v0.5.0: persist the chain's rolling chunk window for this
+        session so a backend restart doesn't break the follow-up
+        retrieval boost. Writes only the chunks field; doesn't bump
+        updated_at because this is purely an internal cache."""
+        conv = self._read_conv(conv_id)
+        if not conv:
+            return None
+        conv["recent_chunks"] = chunks
         self._write_conv(conv)
         return conv
 
