@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   DoneEvent,
   RetrievalTraceEntry,
+  SentenceBinding,
   SourceDoc,
 } from "@/types"
 
@@ -26,6 +27,7 @@ function projectServerMessage(
       retrieval_mode?: string
       standalone_question?: string
       chitchat?: boolean
+      sentence_bindings?: SentenceBinding[]
     }>
     active_variant?: number
   },
@@ -47,6 +49,7 @@ function projectServerMessage(
     retrievalTrace: v.retrieval_trace,
     retrievalMode: v.retrieval_mode,
     chitchat: v.chitchat,
+    sentenceBindings: v.sentence_bindings,
   }))
   const activeIdx = Math.min(
     Math.max(0, m.active_variant ?? 0),
@@ -61,6 +64,7 @@ function projectServerMessage(
     retrievalTrace: active.retrievalTrace,
     retrievalMode: active.retrievalMode,
     chitchat: active.chitchat,
+    sentenceBindings: active.sentenceBindings,
     variants,
     activeVariant: activeIdx,
   }
@@ -366,6 +370,7 @@ export function useChat({
                 standaloneQuery: done.standalone_question,
                 retrievalTrace: done.retrieval_trace,
                 retrievalMode: done.retrieval_mode,
+                sentenceBindings: done.sentence_bindings,
                 serverIndex: aiIdx >= 0 ? aiIdx : undefined,
                 variants: [
                   {
@@ -375,6 +380,7 @@ export function useChat({
                     retrievalTrace: done.retrieval_trace,
                     retrievalMode: done.retrieval_mode,
                     chitchat: done.chitchat,
+                    sentenceBindings: done.sentence_bindings,
                   },
                 ],
                 activeVariant: 0,
@@ -591,6 +597,7 @@ export function useChat({
                         retrievalTrace: done.retrieval_trace,
                         retrievalMode: done.retrieval_mode,
                         chitchat: done.chitchat,
+                        sentenceBindings: done.sentence_bindings,
                       }
                     : v,
                 )
@@ -603,6 +610,7 @@ export function useChat({
                   standaloneQuery: done.standalone_question,
                   retrievalTrace: done.retrieval_trace,
                   retrievalMode: done.retrieval_mode,
+                  sentenceBindings: done.sentence_bindings,
                   variants: newVariants,
                 }
               }),
@@ -699,6 +707,7 @@ export function useChat({
                 retrievalTrace: active.retrievalTrace,
                 retrievalMode: active.retrievalMode,
                 chitchat: active.chitchat,
+                sentenceBindings: active.sentenceBindings,
               }
             : m,
         ),

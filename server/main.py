@@ -624,6 +624,11 @@ async def chat(req: ChatRequest):
         captured_trace: list = []
         captured_mode: str = ""
         captured_chitchat: bool = False
+        # v0.6.0: sentence -> chunk-paragraph bindings for the inline
+        # citation popover. Captured from the done event and persisted
+        # alongside the assistant message so a reloaded conversation
+        # still renders the popovers without re-running retrieval.
+        captured_bindings: list = []
 
         import json as _json
         async for ev in chain_stream_to_sse(events):
@@ -647,6 +652,7 @@ async def chat(req: ChatRequest):
                     captured_trace = payload.get("retrieval_trace", []) or []
                     captured_mode = payload.get("retrieval_mode", "") or ""
                     captured_chitchat = bool(payload.get("chitchat", False))
+                    captured_bindings = payload.get("sentence_bindings", []) or []
                     if not captured_sources:
                         captured_sources = payload.get("source_documents", []) or []
                     if req.regenerate and req.conversation_id:
@@ -670,6 +676,7 @@ async def chat(req: ChatRequest):
                 "retrieval_mode": captured_mode,
                 "standalone_question": captured_standalone,
                 "chitchat": captured_chitchat,
+                "sentence_bindings": captured_bindings,
             }
             if req.regenerate:
                 conv_after = conv_store.append_variant(
@@ -783,6 +790,7 @@ def _message_to_schema(m: dict) -> ConversationMessage:
                     standalone_question=v.get("standalone_question"),
                     chitchat=v.get("chitchat"),
                     error=v.get("error"),
+                    sentence_bindings=v.get("sentence_bindings"),
                 )
                 for v in m["variants"]
             ],

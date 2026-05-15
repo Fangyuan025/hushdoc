@@ -1,4 +1,4 @@
-import { useState } from "react"
+import React, { useMemo, useState } from "react"
 import {
   Check,
   ChevronLeft,
@@ -16,8 +16,9 @@ import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
 
 import { cn } from "@/lib/utils"
-import type { ChatMessage as Msg } from "@/types"
+import type { ChatMessage as Msg, ParagraphBinding } from "@/types"
 
+import { CitationChip } from "./CitationChip"
 import { Sources } from "./Sources"
 
 // Inserting the cursor character into the streaming content directly
@@ -51,6 +52,60 @@ interface ChatMessageProps {
   /** v0.5.0: switch the active variant when the user clicks the pager
    *  arrows. Receives the new (clamped) variant index. */
   onSwitchVariant?: (variantIndex: number) => void
+  /** v0.6.0: open the full source document in a side panel, scrolled
+   *  to the paragraph that backs this citation. Wired by ChatPane to
+   *  the View-source side-panel state. */
+  onOpenSource?: (binding: ParagraphBinding) => void
+}
+
+// v0.6.0: walk markdown-rendered children, replace any `[N]` text with
+// a hover-popover citation chip. Recursive so it works inside <strong>,
+// <em>, list items, table cells, etc. Code blocks are left alone (we
+// avoid injecting components into `code` / `pre` overrides).
+const CITATION_PATTERN = /\[(\d{1,3})\]/g
+
+function renderWithCitations(
+  children: React.ReactNode,
+  bindings: Map<number, ParagraphBinding>,
+  onOpenSource?: (b: ParagraphBinding) => void,
+): React.ReactNode {
+  return React.Children.map(children, (child, childIdx) => {
+    if (typeof child === "string") {
+      const parts: React.ReactNode[] = []
+      let last = 0
+      let m: RegExpExecArray | null
+      CITATION_PATTERN.lastIndex = 0
+      while ((m = CITATION_PATTERN.exec(child)) !== null) {
+        if (m.index > last) parts.push(child.slice(last, m.index))
+        const id = parseInt(m[1], 10)
+        parts.push(
+          <CitationChip
+            key={`cit-${childIdx}-${m.index}`}
+            id={id}
+            binding={bindings.get(id)}
+            onOpenSource={onOpenSource}
+          />,
+        )
+        last = m.index + m[0].length
+      }
+      if (last < child.length) parts.push(child.slice(last))
+      return parts.length > 0 ? parts : child
+    }
+    if (React.isValidElement(child)) {
+      // Skip code / pre / a — citation markers inside fenced code or
+      // explicit links should stay as raw text.
+      const tag = (child.type as string) || ""
+      if (tag === "code" || tag === "pre" || tag === "a") return child
+      const props = child.props as { children?: React.ReactNode }
+      if (props.children !== undefined) {
+        return React.cloneElement(child, {
+          ...props,
+          children: renderWithCitations(props.children, bindings, onOpenSource),
+        } as React.HTMLAttributes<HTMLElement>)
+      }
+    }
+    return child
+  })
 }
 
 /** One chat bubble. Assistant supports markdown + code + GFM tables. */
@@ -59,9 +114,25 @@ export function ChatMessage({
   onReplay,
   onRegenerate,
   onSwitchVariant,
+  onOpenSource,
 }: ChatMessageProps) {
   const isUser = msg.role === "user"
   const [copied, setCopied] = useState(false)
+
+  // v0.6.0: flatten sentence_bindings into a prompt_id -> paragraph
+  // map so the citation chip renderer can look up bindings in O(1).
+  // The same paragraph may appear in multiple sentences (e.g. a chunk
+  // cited from both sentence 2 and sentence 5); we keep the first
+  // occurrence — they should be identical anyway.
+  const bindingsById = useMemo(() => {
+    const map = new Map<number, ParagraphBinding>()
+    for (const sb of msg.sentenceBindings || []) {
+      for (const p of sb.paragraphs) {
+        if (!map.has(p.prompt_id)) map.set(p.prompt_id, p)
+      }
+    }
+    return map
+  }, [msg.sentenceBindings])
 
   const onCopy = async () => {
     try {
@@ -100,6 +171,38 @@ export function ChatMessage({
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
+                  components={{
+                    // v0.6.0: rewrite [N] runs inside any block-level
+                    // text container into hover citation chips. We
+                    // override the common element types; nested
+                    // children are walked recursively by
+                    // renderWithCitations.
+                    p: ({ node, children, ...rest }) => (
+                      <p {...rest}>
+                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                      </p>
+                    ),
+                    li: ({ node, children, ...rest }) => (
+                      <li {...rest}>
+                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                      </li>
+                    ),
+                    td: ({ node, children, ...rest }) => (
+                      <td {...rest}>
+                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                      </td>
+                    ),
+                    th: ({ node, children, ...rest }) => (
+                      <th {...rest}>
+                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                      </th>
+                    ),
+                    blockquote: ({ node, children, ...rest }) => (
+                      <blockquote {...rest}>
+                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                      </blockquote>
+                    ),
+                  }}
                 >
                   {msg.streaming
                     ? msg.content + STREAMING_CURSOR

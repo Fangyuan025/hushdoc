@@ -392,3 +392,205 @@ def bindings_to_payload(bindings: List[SentenceBinding]) -> List[dict]:
         }
         for b in bindings
     ]
+
+
+# ---------------------------------------------------------------------------
+# v0.6.0: post-hoc citation injection
+# ---------------------------------------------------------------------------
+# Heuristic: discourse-only sentences ("In summary,", "It is important
+# to note that...") should never get an auto-citation injected. These
+# regex fragments catch the most common low-content openers in en + zh.
+_DISCOURSE_PATTERNS = (
+    r"^\s*(in summary|in conclusion|overall|to summarize|moreover|"
+    r"furthermore|additionally|in addition|importantly|it is important|"
+    r"however|on the other hand|in contrast|for example|for instance|"
+    r"as mentioned|as noted|finally|first|second|third|lastly)\b",
+    r"^\s*(总之|总而言之|此外|另外|同时|然而|相反|例如|比如|最后|首先|其次|再者|更重要的是)\b",
+)
+
+import re as _re_aux
+_DISCOURSE_RE = _re_aux.compile(
+    "|".join(_DISCOURSE_PATTERNS), _re_aux.IGNORECASE
+)
+
+
+def _is_factual_sentence(text: str) -> bool:
+    """Heuristic gate before we attach an auto-citation to a sentence:
+    must be at least 30 chars and not a pure discourse marker."""
+    s = (text or "").strip()
+    if len(s) < 30:
+        return False
+    if _DISCOURSE_RE.match(s):
+        return False
+    return True
+
+
+def _strip_trailing_period(s: str) -> tuple[str, str]:
+    """Split a sentence into ``(body_without_trailing_punct, punct)``.
+    Punct is the run of trailing terminators / quotes we'd want to put
+    BACK after appending the [N] tag. Matches the splitter's
+    end-of-sentence treatment so the inserted ``[N]`` ends up
+    immediately before the period, like "...claim [1]."."""
+    n = len(s)
+    j = n
+    while j > 0 and s[j - 1] in '"\')]”’':
+        j -= 1
+    end_chars = _SENT_END_CHARS  # local alias
+    if j > 0 and s[j - 1] in end_chars:
+        j -= 1
+    return s[:j].rstrip(), s[j:]
+
+
+def resolve_citations(
+    answer_text: str,
+    kept_docs: List[Document],
+    *,
+    auto_min_score: float = 0.18,
+    max_auto_per_sentence: int = 1,
+) -> tuple[str, List[SentenceBinding]]:
+    """v0.6.0 hybrid citation resolution.
+
+    Path A (model cited): if the answer already has at least one
+    well-resolved ``[N]`` (id within range + score-able), trust the
+    model. We still scan EVERY sentence and attach the best paragraph
+    for each existing ``[N]`` so the popover has content; sentences
+    without [N] tags pass through untouched.
+
+    Path B (model didn't cite): walk every sentence; for each factual
+    sentence (long enough, not a pure discourse marker), score it
+    against every kept chunk's paragraphs, and if the best score
+    clears ``auto_min_score``, append ``[N]`` to that sentence right
+    before its terminator. Returns the rewritten answer text + a full
+    SentenceBinding list ready for the popover.
+
+    Either way the contract is: every ``[N]`` in the returned answer
+    text resolves to a real chunk in ``kept_docs``, and the
+    SentenceBinding paragraphs match the (filename, page) of the
+    chunks the user will see as sources.
+    """
+    if not answer_text or not kept_docs:
+        return answer_text, []
+
+    # Resolve [N] → doc by prompt_id (same map shape as
+    # bind_answer_to_sources).
+    by_id: Dict[int, Document] = {}
+    for d in kept_docs:
+        pid = (d.metadata or {}).get("prompt_id")
+        if isinstance(pid, int) and pid not in by_id:
+            by_id[pid] = d
+
+    # ----- Path A check: does the answer carry any in-range [N]?
+    raw_ids = parse_inline_citations(answer_text) if "parse_inline_citations" in globals() else []
+    # We're in a different module from parse_inline_citations; import it here.
+    if not raw_ids:
+        try:
+            from llm_chain import parse_inline_citations as _pic  # type: ignore
+            raw_ids = _pic(answer_text)
+        except Exception:
+            raw_ids = []
+    in_range_ids = [n for n in raw_ids if n in by_id]
+    model_cited = len(in_range_ids) > 0
+
+    if model_cited:
+        # Trust the model -- just produce bindings for what's there.
+        # bind_answer_to_sources already does the right thing.
+        return answer_text, bind_answer_to_sources(answer_text, kept_docs)
+
+    # ----- Path B: auto-citation. Walk sentences; for each factual
+    # sentence find the best chunk-paragraph match and inject [N].
+    para_cache: Dict[int, List[str]] = {}
+    sentences = split_sentences(answer_text)
+    if not sentences:
+        return answer_text, []
+
+    new_parts: List[str] = []
+    cursor = 0
+    out_bindings: List[SentenceBinding] = []
+    for start, end, sent in sentences:
+        # Preserve any whitespace / leading text between the prior
+        # sentence end and this one (the splitter trims it out).
+        if start > cursor:
+            new_parts.append(answer_text[cursor:start])
+        if not _is_factual_sentence(sent):
+            new_parts.append(sent)
+            cursor = end
+            out_bindings.append(SentenceBinding(
+                text=sent, start=start, end=end,
+                citations=[], paragraphs=[],
+            ))
+            continue
+        # Score against every kept chunk's paragraphs.
+        best_pid: Optional[int] = None
+        best_para: Optional[str] = None
+        best_score: float = 0.0
+        for pid, doc in by_id.items():
+            if pid not in para_cache:
+                para_cache[pid] = split_paragraphs(doc.page_content)
+            for para in para_cache[pid]:
+                score = _score_paragraph(sent, para)
+                if score > best_score:
+                    best_score = score
+                    best_pid = pid
+                    best_para = para
+        if best_pid is None or best_score < auto_min_score or best_para is None:
+            # Ungrounded sentence -- pass through unchanged. Commit 7
+            # will visually mark these in the UI.
+            new_parts.append(sent)
+            cursor = end
+            out_bindings.append(SentenceBinding(
+                text=sent, start=start, end=end,
+                citations=[], paragraphs=[],
+            ))
+            continue
+        # Inject [N] right before the trailing punctuation.
+        body, tail = _strip_trailing_period(sent)
+        injected = f"{body} [{best_pid}]{tail}"
+        new_parts.append(injected)
+        cursor = end
+        meta = (by_id[best_pid].metadata or {})
+        out_bindings.append(SentenceBinding(
+            text=injected,
+            start=start,
+            end=start + len(injected),
+            citations=[best_pid],
+            paragraphs=[ParagraphBinding(
+                prompt_id=best_pid,
+                filename=str(meta.get("filename", "")),
+                page=meta.get("page"),
+                paragraph=best_para,
+                score=round(best_score, 4),
+            )],
+        ))
+    # Glue trailing whitespace after the last sentence.
+    if cursor < len(answer_text):
+        new_parts.append(answer_text[cursor:])
+    new_answer = "".join(new_parts)
+    return new_answer, out_bindings
+
+
+def filter_kept_docs_to_cited(
+    kept_docs: List[Document],
+    answer_text: str,
+) -> List[Document]:
+    """Final source-list contract: a doc shows up as a source iff its
+    prompt_id appears in the (possibly auto-rewritten) answer's
+    [N] tags. Deduped and ordered by first appearance."""
+    if not answer_text:
+        return []
+    try:
+        from llm_chain import parse_inline_citations as _pic  # type: ignore
+        ids = _pic(answer_text)
+    except Exception:
+        ids = []
+    by_id: Dict[int, Document] = {}
+    for d in kept_docs:
+        pid = (d.metadata or {}).get("prompt_id")
+        if isinstance(pid, int) and pid not in by_id:
+            by_id[pid] = d
+    out: List[Document] = []
+    seen: set = set()
+    for n in ids:
+        if n in by_id and n not in seen:
+            out.append(by_id[n])
+            seen.add(n)
+    return out

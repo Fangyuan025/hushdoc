@@ -147,6 +147,11 @@ class MessageVariant(BaseModel):
     standalone_question: Optional[str] = None
     chitchat: Optional[bool] = None
     error: Optional[str] = None
+    # v0.6.0: sentence -> chunk-paragraph bindings for the inline
+    # citation hover popover. Persisted alongside the variant so
+    # reloading the conversation still renders popovers without
+    # re-running retrieval.
+    sentence_bindings: Optional[List[Dict]] = None
 
 
 class ConversationMessage(BaseModel):

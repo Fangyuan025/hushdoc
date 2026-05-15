@@ -262,6 +262,9 @@ class ConversationStore:
                         "standalone_question",
                         "chitchat",
                         "error",
+                        # v0.6.0: persisted per-sentence chunk-paragraph
+                        # bindings for the inline citation popover.
+                        "sentence_bindings",
                     ):
                         if key in m:
                             variant[key] = m[key]

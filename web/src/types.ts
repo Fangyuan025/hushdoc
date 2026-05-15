@@ -73,6 +73,30 @@ export interface RetrievalTraceEntry {
   source?: string
 }
 
+/** v0.6.0: one paragraph inside a cited chunk, picked by the
+ *  sentence-binding pass as the best match for the sentence it's
+ *  attached to. Rendered as a hover popover on each [N] chip. */
+export interface ParagraphBinding {
+  prompt_id: number
+  filename: string
+  page: number | null
+  paragraph: string
+  /** 0..1, higher is better. UI may use this to render a "weak match"
+   *  styling when the score is below some threshold. */
+  score: number
+}
+
+/** v0.6.0: one answer sentence + the paragraphs each of its [N] tags
+ *  resolves to. ``citations`` keeps the ids in encounter order. */
+export interface SentenceBinding {
+  text: string
+  /** Char offsets in the answer text. */
+  start: number
+  end: number
+  citations: number[]
+  paragraphs: ParagraphBinding[]
+}
+
 export interface DoneEvent {
   question: string
   standalone_question: string
@@ -82,11 +106,15 @@ export interface DoneEvent {
   scope: string[] | null
   /** v0.2.0+: per-candidate retrieval trace for the drawer's trace tab. */
   retrieval_trace?: RetrievalTraceEntry[]
-  /** v0.2.0+: 'topk' | 'topk+rerank' | 'balanced' | 'balanced+rerank' | ''. */
+  /** v0.2.0+: 'topk' | 'topk+rerank' | 'balanced' | 'balanced+rerank'
+   *  | 'hybrid+rerank+adaptive(N)+mmr' | ''. */
   retrieval_mode?: string
   /** v0.5.0 regenerate: index into conv["messages"] of the assistant
    *  bubble the new variant attaches to. Absent on non-regenerate turns. */
   regenerated_message_index?: number
+  /** v0.6.0: per-sentence binding to specific chunk paragraphs.
+   *  Powers the inline [N] hover popovers. */
+  sentence_bindings?: SentenceBinding[]
 }
 
 /** v0.5.0: one regenerated version of an assistant turn. Lives in the
@@ -100,6 +128,8 @@ export interface AssistantVariant {
   standaloneQuery?: string
   retrievalTrace?: RetrievalTraceEntry[]
   retrievalMode?: string
+  /** v0.6.0: sentence -> chunk-paragraph bindings for this variant. */
+  sentenceBindings?: SentenceBinding[]
 }
 
 export interface ChatMessage {
@@ -131,4 +161,7 @@ export interface ChatMessage {
   /** v0.5.0: index into variants[] currently rendered. The other
    *  display fields (content / sources / etc.) mirror this variant. */
   activeVariant?: number
+  /** v0.6.0: sentence -> chunk-paragraph bindings for the active
+   *  variant's content. Powers the inline [N] hover popovers. */
+  sentenceBindings?: SentenceBinding[]
 }

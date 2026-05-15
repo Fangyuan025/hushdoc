@@ -44,7 +44,12 @@ from llama_server import (
     DEFAULT_MODEL_PATH as SERVER_DEFAULT_MODEL_PATH,
 )
 import doc_summaries
-from chain_grounding import bind_answer_to_sources, bindings_to_payload
+from chain_grounding import (
+    bind_answer_to_sources,
+    bindings_to_payload,
+    filter_kept_docs_to_cited,
+    resolve_citations,
+)
 
 logger = logging.getLogger("llm_chain")
 if not logger.handlers:
@@ -1380,16 +1385,17 @@ class RAGChain:
 
         all_docs = result.get("source_documents", [])
         answer_text = result.get("answer", "")
-        # v0.6.0: strict citation filter. Sources surfaced to the UI are
-        # exactly the [N]-tagged chunks the answer referenced, deduped
-        # and ordered. Hallucinated [N] outside the valid range are
-        # stripped from the answer text so the UI never renders a chip
-        # that points at nothing.
+        # v0.6.0: sanitize hallucinated [N] first, then resolve
+        # citations. ``resolve_citations`` trusts the model's [N]
+        # when it cited anything in-range; otherwise it walks the
+        # answer sentence-by-sentence, finds the best matching chunk
+        # paragraph for each factual sentence, and injects a [N]
+        # tag. Sources are then exactly the chunks whose ids appear
+        # in the (possibly auto-rewritten) answer.
         answer_text = sanitize_answer_citations(answer_text, len(all_docs))
-        cited = filter_sources_by_inline_ids(all_docs, answer_text)
-        sentence_bindings = bindings_to_payload(
-            bind_answer_to_sources(answer_text, cited)
-        )
+        answer_text, bindings = resolve_citations(answer_text, all_docs)
+        cited = filter_kept_docs_to_cited(all_docs, answer_text)
+        sentence_bindings = bindings_to_payload(bindings)
 
         return {
             "question": question,
@@ -1574,19 +1580,24 @@ class RAGChain:
             raise RuntimeError("Streaming generation failed.") from exc
 
         # v0.6.0: strip any hallucinated [N] (outside the valid id range)
-        # from the raw answer BEFORE we cache it as history -- otherwise a
-        # follow-up turn would see a citation that doesn't resolve.
+        # from the raw answer, then resolve citations. When the model
+        # cited at least one in-range [N] we trust it; otherwise we
+        # walk the answer sentence-by-sentence and inject [N] tags
+        # for factual sentences that match a kept chunk's paragraph
+        # above the auto-cite threshold. This decouples reliability of
+        # the source attribution from the small model's tendency to
+        # ignore citation instructions on some prompt rolls.
         cleaned = self._strip_reasoning(full_raw)
         cleaned = sanitize_answer_citations(cleaned, len(docs))
+        cleaned, bindings = resolve_citations(cleaned, docs)
         history.add_user_message(question)
         history.add_ai_message(cleaned)
 
-        # Strict citation filter (v0.6.0): the UI's Sources list is
-        # exactly the [N]-tagged chunks the answer referenced. No
-        # "return everything if the model forgot to cite" fallback --
-        # that path was the root cause of the "Sources panel full of
-        # irrelevant chunks" complaint in v0.5.0.
-        cited = filter_sources_by_inline_ids(docs, cleaned)
+        # Source list (v0.6.0): exactly the chunks whose ids appear
+        # as [N] in the post-resolve answer text. Either model-written
+        # or auto-injected -- both go through the same filter so the
+        # UI never sees a source the answer doesn't reference.
+        cited = filter_kept_docs_to_cited(docs, cleaned)
 
         # Trace tagging matches the same numeric id space. Each candidate
         # chunk has a prompt_id stamped by format_documents; the cited
@@ -1632,9 +1643,9 @@ class RAGChain:
         # v0.6.0: per-sentence binding of the answer to specific
         # paragraphs inside the cited chunks. The frontend renders each
         # [N] chip with a hover popover containing the matched paragraph.
-        sentence_bindings = bindings_to_payload(
-            bind_answer_to_sources(cleaned, cited)
-        )
+        # ``bindings`` was already computed by resolve_citations above
+        # so we just serialise it for the SSE payload.
+        sentence_bindings = bindings_to_payload(bindings)
 
         yield ("done", {
             "question": question,

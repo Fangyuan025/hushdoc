@@ -32,6 +32,20 @@ export interface ServerVariant {
   standalone_question?: string
   chitchat?: boolean
   error?: string
+  /** v0.6.0: persisted sentence -> chunk-paragraph bindings. */
+  sentence_bindings?: Array<{
+    text: string
+    start: number
+    end: number
+    citations: number[]
+    paragraphs: Array<{
+      prompt_id: number
+      filename: string
+      page: number | null
+      paragraph: string
+      score: number
+    }>
+  }>
 }
 
 export interface ConversationMessage {
