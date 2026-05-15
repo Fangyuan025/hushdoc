@@ -161,8 +161,27 @@ ANSWER_SYSTEM = (
     "5. When the context contains tables, code, or formulas, preserve their "
     "   structure verbatim. For LaTeX formulas in the context, keep them in "
     "   LaTeX form in your answer.\n"
-    "6. Cite sources inline as [filename p.<page>] using the page numbers "
-    "   shown in each excerpt header. Only cite excerpts you actually used.\n"
+    "6. CITATIONS — MANDATORY for every fact:\n"
+    "   Each excerpt above is tagged with a number — [1], [2], [3], ... "
+    "   — in its header line. Whenever your answer states ANY specific "
+    "   fact, finding, number, name, definition, or claim from those "
+    "   excerpts, you MUST append the source tag(s) at the end of that "
+    "   sentence, immediately before the period.\n"
+    "   Examples (the [N] is required on the ✓ rows):\n"
+    "     ✓ \"The study sampled 47 participants [1].\"\n"
+    "     ✓ \"P3 reported emotional disclosure to the chatbot [2].\"\n"
+    "     ✓ \"The privacy paradox extends to AI chatbots [1][3].\"\n"
+    "     ✓ \"该研究采用混合方法 [2]。\"  (Chinese works the same way)\n"
+    "     ✗ \"In summary, ...\"   (discourse connector — no [N])\n"
+    "     ✗ \"It is important to ...\"  (no specific claim)\n"
+    "   Hard rules:\n"
+    "   - Cite ONLY the numeric tags shown above. Do NOT invent new "
+    "     numbers. Do NOT use legacy formats like [paper.pdf p.5].\n"
+    "   - Multiple tags on one sentence is fine: [1][3].\n"
+    "   - If you mention a number, year, author name, or quoted phrase "
+    "     and can't trace it to a specific [N], OMIT it entirely.\n"
+    "   - Do NOT add a 'References:' / 'Sources:' section. Inline [N] "
+    "     tags are the only citation surface.\n"
     "7. Be concise. Do not repeat yourself. Do not fabricate quotes."
 )
 
@@ -252,13 +271,25 @@ def detect_language(text: str) -> str:
 def language_directive(lang: str) -> str:
     """The last-line instruction we splice into prompts. Designed to be the
     most recent token the model reads, since trailing instructions tend to
-    win over earlier system-prompt-level ones in small models."""
+    win over earlier system-prompt-level ones in small models.
+
+    v0.6.0: now ALSO carries the citation reminder, because small models
+    (Qwen3-1.7B in particular) routinely ignored the system-prompt-level
+    [N] rule. Putting "cite as [N]" in the same trailing slot as the
+    language directive consistently triggers the format."""
     if lang == "zh":
         return (
             "IMPORTANT: 必须用中文回答。即使上下文是英文，回答也必须是中文。"
-            "Reply in Chinese only."
+            "Reply in Chinese only. 在陈述具体事实的每个句子末尾、句号"
+            "之前，必须加上对应摘录的 [N] 标签（N 是上文摘录开头方括号"
+            "里的数字）。例：「该研究采用混合方法 [2]。」"
         )
-    return "Reply in English."
+    return (
+        "Reply in English. For EVERY sentence that states a specific "
+        "fact, finding, number, or claim from the excerpts, append the "
+        "matching [N] tag(s) right before the period — e.g. "
+        "\"The study sampled 47 participants [1].\"."
+    )
 
 
 # Two pattern groups:
@@ -529,13 +560,21 @@ def format_documents(
     """Render retrieved chunks (and optional doc-level summaries) for the
     answer prompt.
 
-    Avoids leading [1]/[2]/[3] numbering on purpose: small models tend to
-    mirror that pattern and produce 'enumerate-each-chunk' answers instead
-    of synthesizing. Natural-language headers keep the citations available
-    without inviting the format to be copied verbatim into the reply.
+    v0.6.0: every chunk is tagged with a numeric id [1], [2], ... shown
+    in its header. The model cites these ids inline -- e.g. "..[2].." --
+    and the server uses the same id to look up exactly which chunk a
+    citation refers to. The pre-v0.6.0 "[filename p.5]" pattern produced
+    page-level (file, page) tuples that conflated multiple chunks on
+    the same page; numeric ids are chunk-level and unambiguous.
 
-    When `summaries` is provided, the rendered context begins with a
-    compact 'Documents in scope' overview followed by '## Excerpts'. This
+    We stamp the assigned id back into each Document's metadata under
+    ``prompt_id`` so downstream code (citation filter, trace tagging,
+    sentence-paragraph binding) addresses the same numbering the model
+    saw. Mutation in-place is OK because the chain owns these Documents
+    -- they came out of retrieval and aren't shared with caller code.
+
+    When ``summaries`` is provided, the rendered context begins with a
+    compact 'Documents in scope' overview followed by 'Excerpts'. This
     gives the model document-level awareness even when the retrieved
     excerpts skew toward one file.
     """
@@ -543,16 +582,19 @@ def format_documents(
     if summaries:
         parts.append(doc_summaries.format_overview(summaries))
         parts.append("")  # blank line
-        parts.append("Excerpts:")
-    for d in docs:
-        meta = d.metadata or {}
+        parts.append(
+            "Excerpts (each has a numeric tag in brackets; cite as [N]):"
+        )
+    for i, d in enumerate(docs, start=1):
+        meta = dict(d.metadata or {})
         filename = meta.get("filename", "unknown")
         page = meta.get("page") or meta.get("pages", "?")
         heading = meta.get("headings", "")
-        header = f"--- From {filename} (page {page})"
+        meta["prompt_id"] = i
+        d.metadata = meta
+        header = f"[{i}] {filename} (page {page})"
         if heading:
             header += f", section: {heading}"
-        header += " ---"
         parts.append(f"{header}\n{d.page_content}")
     return "\n\n".join(parts) if parts else "(no relevant context found)"
 
@@ -584,12 +626,17 @@ def filter_sources_by_citations(
     docs: List[Document],
     answer_text: str,
 ) -> List[Document]:
-    """Return only the source documents whose (filename, page) is mentioned
-    inline in the answer. Falls back to ALL docs if no citations parsed
-    (so the user still sees evidence even if the model forgot to cite)."""
+    """Legacy v0.5.x source filter that matched on `[filename p.5]`-style
+    citations. Kept ONLY as a fallback for when an answer somehow leaked
+    the old format despite the v0.6.0 prompt; the strict path goes
+    through ``filter_sources_by_inline_ids``.
+
+    Returns the cited subset, or an empty list when nothing parses (the
+    v0.6.0 contract: an un-cited answer has zero sources).
+    """
     cites = parse_citations(answer_text)
     if not cites:
-        return docs
+        return []
 
     cited_pairs: set[tuple[str, str]] = set()
     for fn, page in cites:
@@ -604,17 +651,101 @@ def filter_sources_by_citations(
         else:
             cited_pairs.add((fn.lower(), page.strip()))
 
-    cited_files = {fn for fn, _ in cited_pairs}
     out: List[Document] = []
+    seen_keys: set[tuple[str, str]] = set()
     for d in docs:
         meta = d.metadata or {}
         fn = str(meta.get("filename", "")).lower()
         page = str(meta.get("page", "") or "")
-        if (fn, page) in cited_pairs or fn in cited_files:
-            # Match by exact (file,page) first, else fall back to file-level
-            # so users still get the right file even if the page is off-by-one.
+        key = (fn, page)
+        if key in cited_pairs and key not in seen_keys:
             out.append(d)
-    return out or docs  # never return empty; user wants to see SOMEthing
+            seen_keys.add(key)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# v0.6.0 numeric inline citations.
+# ---------------------------------------------------------------------------
+# Matches `[1]`, `[12]`, ... — never a word inside brackets, never `[1-3]`.
+# We deliberately ignore `[1, 2]` patterns; model is told to write `[1][2]`.
+_INLINE_CITATION_RE = re.compile(r"\[(\d{1,3})\]")
+
+
+def parse_inline_citations(answer_text: str) -> List[int]:
+    """Return the 1-based source ids the answer cites, in order of first
+    appearance. Deduped. Out-of-range / non-numeric refs are filtered by
+    the caller against ``len(docs)``."""
+    if not answer_text:
+        return []
+    seen: List[int] = []
+    seen_set: set[int] = set()
+    for m in _INLINE_CITATION_RE.finditer(answer_text):
+        try:
+            n = int(m.group(1))
+        except ValueError:
+            continue
+        if n in seen_set:
+            continue
+        seen.append(n)
+        seen_set.add(n)
+    return seen
+
+
+def filter_sources_by_inline_ids(
+    docs: List[Document],
+    answer_text: str,
+) -> List[Document]:
+    """v0.6.0 strict source selection. Returns ONLY the chunks whose
+    1-based ``prompt_id`` (assigned by ``format_documents`` at prompt
+    render time) appears as ``[N]`` in the answer.
+
+    Critical behaviour: an answer with zero citations gets zero
+    sources. Pre-v0.6.0 the page-based filter fell back to "return
+    every retrieved doc" in that case, which is exactly what produced
+    the "Sources panel full of irrelevant chunks" pain point. Here we
+    accept that an uncited answer shows no chips -- that's the right
+    signal to the user.
+
+    Falls through to the legacy (filename, page) filter ONLY when the
+    answer contains no ``[N]`` patterns at all AND the legacy regex
+    finds at least one ``[file p.5]`` mention -- belt-and-braces in
+    case the model ignores the new format on some prompt template.
+    """
+    if not docs or not answer_text:
+        return []
+    ids = parse_inline_citations(answer_text)
+    if ids:
+        max_id = len(docs)
+        # Build prompt_id -> doc index, preferring the first occurrence
+        # if for some reason the same id appears twice (shouldn't happen
+        # because format_documents enumerates).
+        by_id: Dict[int, Document] = {}
+        for d in docs:
+            pid = (d.metadata or {}).get("prompt_id")
+            if isinstance(pid, int) and pid not in by_id:
+                by_id[pid] = d
+        return [by_id[n] for n in ids if 1 <= n <= max_id and n in by_id]
+    # No numeric citations -- try legacy parser before giving up.
+    return filter_sources_by_citations(docs, answer_text)
+
+
+def sanitize_answer_citations(answer_text: str, max_id: int) -> str:
+    """Strip ``[N]`` whose N is outside ``[1, max_id]`` -- those are
+    hallucinated citations the user shouldn't see (rendering them would
+    let the model fabricate references that don't resolve to anything).
+    Leaves valid citations untouched."""
+    if not answer_text or max_id <= 0:
+        return answer_text
+
+    def _repl(m: re.Match) -> str:
+        try:
+            n = int(m.group(1))
+        except ValueError:
+            return ""
+        return m.group(0) if 1 <= n <= max_id else ""
+
+    return _INLINE_CITATION_RE.sub(_repl, answer_text)
 
 
 # ---------------------------------------------------------------------------
@@ -1221,9 +1352,13 @@ class RAGChain:
 
         all_docs = result.get("source_documents", [])
         answer_text = result.get("answer", "")
-        # Show only sources actually cited in the answer; keep the full list
-        # under all_source_documents for callers that want to see everything.
-        cited = filter_sources_by_citations(all_docs, answer_text)
+        # v0.6.0: strict citation filter. Sources surfaced to the UI are
+        # exactly the [N]-tagged chunks the answer referenced, deduped
+        # and ordered. Hallucinated [N] outside the valid range are
+        # stripped from the answer text so the UI never renders a chip
+        # that points at nothing.
+        answer_text = sanitize_answer_citations(answer_text, len(all_docs))
+        cited = filter_sources_by_inline_ids(all_docs, answer_text)
 
         return {
             "question": question,
@@ -1382,6 +1517,12 @@ class RAGChain:
             expanded_query_hint=expanded_hint,
             language_directive=lang_directive,
         )
+        # v0.6.0 debug: dump the final rendered system + human so we
+        # can verify [N] tags + citation directive actually reach the
+        # model. Cheap (just a debug log), gated behind log level.
+        if logger.isEnabledFor(logging.DEBUG):
+            for m in messages:
+                logger.debug("prompt[%s] %s", m.type, m.content[:1500])
         full_raw = ""
         stripper = _ThinkStripFilter()
         try:
@@ -1400,38 +1541,61 @@ class RAGChain:
             logger.exception("Streaming answer generation failed.")
             raise RuntimeError("Streaming generation failed.") from exc
 
+        # v0.6.0: strip any hallucinated [N] (outside the valid id range)
+        # from the raw answer BEFORE we cache it as history -- otherwise a
+        # follow-up turn would see a citation that doesn't resolve.
         cleaned = self._strip_reasoning(full_raw)
+        cleaned = sanitize_answer_citations(cleaned, len(docs))
         history.add_user_message(question)
         history.add_ai_message(cleaned)
 
-        # Filter sources to those actually cited in the final answer; keep
-        # the full list under all_source_documents for callers that want it.
-        cited = filter_sources_by_citations(docs, cleaned)
+        # Strict citation filter (v0.6.0): the UI's Sources list is
+        # exactly the [N]-tagged chunks the answer referenced. No
+        # "return everything if the model forgot to cite" fallback --
+        # that path was the root cause of the "Sources panel full of
+        # irrelevant chunks" complaint in v0.5.0.
+        cited = filter_sources_by_inline_ids(docs, cleaned)
 
-        # Mark every trace entry that ended up cited so the UI can render
-        # ★/✓ flags on the rows the LLM actually used. Citation match is
-        # on (filename.lower(), str(page)) -- same key the source-filter
-        # already used above.
-        cited_pairs = parse_citations(cleaned)
-        cited_key_set: set[tuple[str, str]] = set()
-        for fn, page in cited_pairs:
-            if "-" in page or "–" in page:
-                try:
-                    lo, hi = re.split(r"[-–]", page)
-                    for p in range(int(lo.strip()), int(hi.strip()) + 1):
-                        cited_key_set.add((fn.lower(), str(p)))
-                except Exception:
-                    cited_key_set.add((fn.lower(), page.strip()))
-            else:
-                cited_key_set.add((fn.lower(), page.strip()))
-
+        # Trace tagging matches the same numeric id space. Each candidate
+        # chunk has a prompt_id stamped by format_documents; the cited
+        # entries are those whose id appears in the answer.
+        cited_ids = set(parse_inline_citations(cleaned))
+        # Legacy fallback for trace tagging: if numeric ids found
+        # nothing, fall back to the page-based key set so we still
+        # surface SOMETHING on the trace tab.
+        legacy_pairs: set[tuple[str, str]] = set()
+        if not cited_ids:
+            for fn, page in parse_citations(cleaned):
+                if "-" in page or "–" in page:
+                    try:
+                        lo, hi = re.split(r"[-–]", page)
+                        for p in range(int(lo.strip()), int(hi.strip()) + 1):
+                            legacy_pairs.add((fn.lower(), str(p)))
+                    except Exception:
+                        legacy_pairs.add((fn.lower(), page.strip()))
+                else:
+                    legacy_pairs.add((fn.lower(), page.strip()))
         trace = state.get("retrieval_trace") or []
+        for entry in trace:
+            pid = entry.get("chunk_index")
+            # The trace's chunk_index is the index from rerank, not our
+            # prompt_id. So we resolve via filename+page or prompt_id.
+            # Cleanest: look up each cited doc's filename+page and mark
+            # the trace row that matches.
+            entry["cited"] = False
+        cited_keys = {
+            (
+                str((d.metadata or {}).get("filename", "")).lower(),
+                str((d.metadata or {}).get("page", "")),
+            )
+            for d in cited
+        } | legacy_pairs
         for entry in trace:
             key = (
                 str(entry.get("filename", "")).lower(),
                 str(entry.get("page", "")),
             )
-            entry["cited"] = key in cited_key_set
+            entry["cited"] = key in cited_keys
 
         yield ("done", {
             "question": question,
