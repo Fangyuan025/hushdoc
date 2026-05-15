@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import type { ChatMessage as Msg, ParagraphBinding } from "@/types"
 
 import { CitationChip } from "./CitationChip"
+import { PdfChunkViewer } from "./PdfChunkViewer"
 import { Sources } from "./Sources"
 
 // Inserting the cursor character into the streaming content directly
@@ -114,10 +115,21 @@ export function ChatMessage({
   onReplay,
   onRegenerate,
   onSwitchVariant,
-  onOpenSource,
+  onOpenSource: onOpenSourceExternal,
 }: ChatMessageProps) {
   const isUser = msg.role === "user"
   const [copied, setCopied] = useState(false)
+  // v0.6.0: clicking "View source →" in a citation popover mounts the
+  // PDF viewer modal. State is local to the message bubble so multiple
+  // messages can have their own viewer state without colliding.
+  const [viewingSource, setViewingSource] =
+    useState<ParagraphBinding | null>(null)
+  const openSource = (b: ParagraphBinding) => {
+    // Parent can override (e.g. ChatPane might want a side panel
+    // instead of modal); fall back to our local modal otherwise.
+    if (onOpenSourceExternal) onOpenSourceExternal(b)
+    else setViewingSource(b)
+  }
 
   // v0.6.0: flatten sentence_bindings into a prompt_id -> paragraph
   // map so the citation chip renderer can look up bindings in O(1).
@@ -179,27 +191,27 @@ export function ChatMessage({
                     // renderWithCitations.
                     p: ({ node, children, ...rest }) => (
                       <p {...rest}>
-                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </p>
                     ),
                     li: ({ node, children, ...rest }) => (
                       <li {...rest}>
-                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </li>
                     ),
                     td: ({ node, children, ...rest }) => (
                       <td {...rest}>
-                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </td>
                     ),
                     th: ({ node, children, ...rest }) => (
                       <th {...rest}>
-                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </th>
                     ),
                     blockquote: ({ node, children, ...rest }) => (
                       <blockquote {...rest}>
-                        {renderWithCitations(children, bindingsById, onOpenSource)}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </blockquote>
                     ),
                   }}
@@ -279,6 +291,18 @@ export function ChatMessage({
         <div className="order-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
           <User className="h-4 w-4" />
         </div>
+      )}
+      {/* v0.6.0 View-source modal. Lives at the message scope so two
+          messages can each manage their own without state collision.
+          Highlight target is the bound paragraph (not the full chunk),
+          rendered as a vertical-bar accent via .paragraphRef. */}
+      {viewingSource && (
+        <PdfChunkViewer
+          filename={viewingSource.filename}
+          initialPage={viewingSource.page ?? 1}
+          chunkText={viewingSource.paragraph}
+          onClose={() => setViewingSource(null)}
+        />
       )}
     </div>
   )

@@ -233,7 +233,13 @@ export function PdfChunkViewer({
         // displays normally, just without the highlight overlay.
         if (chunkText && textLayer) {
           try {
-            const tagged = highlightChunkInTextLayer(textLayer, chunkText)
+            // v0.6.0 uses the paragraph-anchor class (subtle vertical
+            // bar + faint tint) instead of v0.5.0's full yellow wash
+            // -- citations are now sentence-level so the smaller
+            // visual cue is more appropriate.
+            const tagged = highlightChunkInTextLayer(
+              textLayer, chunkText, "paragraphRef",
+            )
             if (tagged === 0) {
               // No-op for the user -- but log it so a future
               // quality-pass can spot which docs hit this path
@@ -248,7 +254,7 @@ export function PdfChunkViewer({
               // Scroll the first highlighted span into view so the
               // user doesn't have to hunt for it on a long page.
               const first = textLayer.querySelector<HTMLElement>(
-                ".chunkMatch",
+                ".paragraphRef",
               )
               if (first) {
                 first.scrollIntoView({

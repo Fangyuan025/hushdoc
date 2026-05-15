@@ -166,14 +166,26 @@
 .textLayer ::selection {
   background: color-mix(in oklch, var(--primary) 35%, transparent);
 }
-/* Chunk-match highlight: a saturated yellow marker so it stays
- * visible on white PDF pages. Pre-v0.5.0-rc we used the primary tint
- * with mix-blend-mode: multiply, which looked grey on light PDFs and
- * was nearly invisible. The yellow + opacity combo mimics a physical
- * highlighter pen and survives both light and dark page-background
- * variants. */
+/* v0.5.0 .chunkMatch — saturated yellow marker (legacy, kept for
+ * backwards compat with any third-party PDF viewer integration).
+ * v0.6.0 the viewer paints `.paragraphRef` instead — a subtle
+ * left-edge accent that marks the cited paragraph without smearing
+ * a yellow wash across the page. The yellow rule remains in case
+ * some downstream component still uses .chunkMatch. */
 .textLayer .chunkMatch {
   background: rgba(255, 220, 0, 0.55);
   border-radius: 2px;
   box-shadow: 0 0 0 1px rgba(230, 180, 0, 0.35);
+}
+
+/* v0.6.0 paragraph anchor: a vertical accent bar attached to the
+ * left side of every span in the matched paragraph, plus a faint
+ * tint behind the text. Inspired by GitHub's "changed line"
+ * gutter — present enough that the eye jumps to it, restrained
+ * enough that the PDF itself stays readable. */
+.textLayer .paragraphRef {
+  background: color-mix(in oklch, var(--primary) 8%, transparent);
+  box-shadow:
+    -4px 0 0 0 color-mix(in oklch, var(--primary) 75%, transparent);
+  border-radius: 0 2px 2px 0;
 }
