@@ -1,5 +1,6 @@
 """
-Cross-encoder reranker for RAG retrieval.
+Cross-encoder reranker for RAG retrieval, plus v0.6.0 post-rerank
+helpers: adaptive top-k truncation and MMR diversification.
 
 Bi-encoder similarity (the SentenceTransformer-based vector search the
 ChromaDB store uses) compresses each chunk to a 384-d vector once and
@@ -21,7 +22,7 @@ similarity for both English and (with caveats) Chinese queries.
 from __future__ import annotations
 
 import logging
-from typing import List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from langchain_core.documents import Document
 
@@ -158,4 +159,200 @@ def rerank_with_trace(
         if new_rank < top_k:
             trace[orig_idx]["rank_after"] = new_rank
             new_docs.append(docs[orig_idx])
+    return new_docs, trace
+
+
+# ---------------------------------------------------------------------------
+# v0.6.0 post-rerank shaping: adaptive truncation + MMR diversification
+# ---------------------------------------------------------------------------
+import re
+from langchain_core.documents import Document  # type: ignore  # already imported
+
+_MMR_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[一-鿿]", re.UNICODE)
+
+
+def _tokset(text: str) -> set:
+    if not text:
+        return set()
+    return {t.lower() for t in _MMR_TOKEN_RE.findall(text)}
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+
+def adaptive_keep(
+    docs: List[Document],
+    trace: List[dict],
+    *,
+    min_keep: int = 3,
+    keep_ratio: float = 0.3,
+) -> tuple[List[Document], List[dict]]:
+    """v0.6.0: drop the rerank tail when cross-encoder scores fall off
+    a cliff. Concretely: keep doc i iff its score is within
+    ``keep_ratio`` of the top doc's range (shifted to non-negative
+    space first because cross-encoder scores can be negative on
+    irrelevant pairs). Always keep at least ``min_keep`` so the
+    chain never starves on a single-chunk prompt.
+
+    Defaults are deliberately conservative -- the early v0.6.0
+    iteration shipped with min_keep=2 / ratio=0.5 and routinely cut
+    a 6-doc pool down to 2, after which the answer model had too
+    little to cite and the strict-citation filter left zero sources
+    on screen. 3 / 0.3 keeps enough breathing room while still
+    dropping the clearly-noise tail.
+
+    Operates only on the docs whose rerank_after is not None (i.e. the
+    rerank-kept set). Trace rows whose rank_after gets dropped go from
+    ``rank_after=<n>`` back to ``rank_after=None`` so the UI's
+    Retrieval-trace tab shows them as "dropped by adaptive truncation"
+    rather than mysteriously vanishing.
+
+    A 'no-op' case is when no rerank ran (scores all None / equal):
+    return docs unchanged."""
+    if len(docs) <= min_keep:
+        return docs, trace
+    # Trace scores are aligned 1:1 with the original candidate list (the
+    # pre-rerank order). We need the scores ordered by current rerank
+    # rank — i.e. matching ``docs``. Re-derive from the trace.
+    # Build mapping from doc-content prefix -> trace entry so we can
+    # look scores up without relying on identity.
+    score_for_doc: List[Optional[float]] = []
+    for d in docs:
+        s: Optional[float] = None
+        for e in trace:
+            if e.get("rank_after") is None:
+                continue
+            # Match on the chunk_index + filename since that's the
+            # stable key the rerank trace already uses.
+            if (
+                e.get("filename") == (d.metadata or {}).get("filename")
+                and str(e.get("chunk_index")) == str(
+                    (d.metadata or {}).get("chunk_index")
+                )
+            ):
+                s = e.get("score_after")
+                break
+        score_for_doc.append(s)
+    if not any(isinstance(s, (int, float)) for s in score_for_doc):
+        return docs, trace
+    top_score = max(s for s in score_for_doc if isinstance(s, (int, float)))
+    # Cross-encoder scores can be negative on irrelevant pairs. To make
+    # the ratio behave naturally, shift everything to >= 0 before
+    # comparing.
+    floor = min(s for s in score_for_doc if isinstance(s, (int, float)))
+    shifted_top = top_score - floor
+    if shifted_top <= 0:
+        return docs, trace
+    threshold = floor + keep_ratio * shifted_top
+    kept_docs: List[Document] = []
+    kept_indices_in_orig: List[int] = []
+    for i, (d, s) in enumerate(zip(docs, score_for_doc)):
+        if isinstance(s, (int, float)) and s < threshold and len(kept_docs) >= min_keep:
+            continue
+        kept_docs.append(d)
+        kept_indices_in_orig.append(i)
+    # Update trace: any rank_after that points past the kept count
+    # becomes None.
+    n_kept = len(kept_docs)
+    for e in trace:
+        ra = e.get("rank_after")
+        if ra is None:
+            continue
+        if ra >= n_kept:
+            e["rank_after"] = None
+    return kept_docs, trace
+
+
+def mmr_reorder(
+    docs: List[Document],
+    trace: List[dict],
+    *,
+    lambda_: float = 0.7,
+) -> tuple[List[Document], List[dict]]:
+    """v0.6.0: re-order ``docs`` using Maximal Marginal Relevance to
+    reduce near-duplicate top-k entries.
+
+    Score(d) for the next pick = ``lambda_ * relevance(d) -
+    (1 - lambda_) * max_sim_to_already_picked(d)``. ``relevance(d)`` is
+    the cross-encoder score from the rerank trace (falls back to a
+    rank-based proxy when scores are missing). Similarity is token
+    Jaccard over the chunk's page_content -- pure-Python, no embedding
+    calls needed. ``lambda_=0.7`` (default) favours relevance over
+    diversity but still rotates duplicates out of the head.
+
+    Trace ``rank_after`` is rewritten to the new MMR order so the UI
+    shows the same ordering the chain handed to the model."""
+    if len(docs) <= 1:
+        return docs, trace
+    # Build relevance scores for each kept doc.
+    rel: List[float] = []
+    for d in docs:
+        s: Optional[float] = None
+        for e in trace:
+            if (
+                e.get("filename") == (d.metadata or {}).get("filename")
+                and str(e.get("chunk_index")) == str(
+                    (d.metadata or {}).get("chunk_index")
+                )
+            ):
+                s = e.get("score_after")
+                break
+        if isinstance(s, (int, float)):
+            rel.append(float(s))
+        else:
+            # No rerank score -- approximate from rerank rank.
+            rank_after = None
+            for e in trace:
+                if (
+                    e.get("filename") == (d.metadata or {}).get("filename")
+                    and str(e.get("chunk_index")) == str(
+                        (d.metadata or {}).get("chunk_index")
+                    )
+                ):
+                    rank_after = e.get("rank_after")
+                    break
+            if isinstance(rank_after, int):
+                rel.append(1.0 - rank_after / max(1, len(docs)))
+            else:
+                rel.append(0.0)
+    tokens = [_tokset(d.page_content) for d in docs]
+
+    # Greedy MMR: pick one at a time.
+    n = len(docs)
+    remaining = list(range(n))
+    picked: List[int] = []
+    while remaining:
+        best_i = remaining[0]
+        best_score = float("-inf")
+        for i in remaining:
+            if not picked:
+                score = rel[i]
+            else:
+                max_sim = max(_jaccard(tokens[i], tokens[j]) for j in picked)
+                score = lambda_ * rel[i] - (1.0 - lambda_) * max_sim
+            if score > best_score:
+                best_score = score
+                best_i = i
+        picked.append(best_i)
+        remaining.remove(best_i)
+    new_docs = [docs[i] for i in picked]
+    # Rewrite trace rank_after to MMR order.
+    new_rank_by_key: Dict[tuple, int] = {}
+    for new_rank, d in enumerate(new_docs):
+        key = (
+            (d.metadata or {}).get("filename"),
+            str((d.metadata or {}).get("chunk_index")),
+        )
+        new_rank_by_key[key] = new_rank
+    for e in trace:
+        if e.get("rank_after") is None:
+            continue
+        key = (e.get("filename"), str(e.get("chunk_index")))
+        if key in new_rank_by_key:
+            e["rank_after"] = new_rank_by_key[key]
     return new_docs, trace

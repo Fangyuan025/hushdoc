@@ -1205,14 +1205,41 @@ class RAGChain:
             # per-candidate score / rank info for the UI's Retrieval-trace
             # panel; we stash it on state so the streaming path can ship
             # it out in the `done` event without restructuring the chain.
-            if self.use_reranker and len(candidates) > self.k:
-                from reranker import rerank_with_trace
-                docs, trace = rerank_with_trace(query, candidates, top_k=self.k)
-                mode = base_mode + "+rerank" + mode_extra
-            else:
-                from reranker import rerank_with_trace
-                docs, trace = rerank_with_trace(query, candidates, top_k=self.k)
-                mode = base_mode + mode_extra
+            from reranker import rerank_with_trace, adaptive_keep, mmr_reorder
+            docs, trace = rerank_with_trace(query, candidates, top_k=self.k)
+            reranked = self.use_reranker and len(candidates) > self.k
+
+            # v0.6.0: post-rerank shaping.
+            # (a) Adaptive truncation: drop tail docs whose score is on
+            #     the wrong side of a cliff. Means an answer model with
+            #     a clear top-3 doesn't get padded out to k=6 with weak
+            #     chunks that would only add noise + spurious citations.
+            # (b) MMR diversification: rotate near-duplicate top-k
+            #     entries so the model sees distinct paragraphs instead
+            #     of the same passage three times.
+            #
+            # Both are gated behind env vars so a user with bad results
+            # on a specific corpus can flip them off without recompiling.
+            adapt_on = os.environ.get(
+                "HUSHDOC_ADAPTIVE_K", "1"
+            ).strip().lower() not in {"0", "false", "off", ""}
+            mmr_lambda_raw = os.environ.get("HUSHDOC_MMR_LAMBDA", "0.7").strip()
+            try:
+                mmr_lambda = float(mmr_lambda_raw)
+            except ValueError:
+                mmr_lambda = 0.7
+            mmr_on = 0.0 < mmr_lambda < 1.0
+            mode_suffix = ""
+            if adapt_on and reranked:
+                before = len(docs)
+                docs, trace = adaptive_keep(docs, trace, min_keep=2)
+                if len(docs) < before:
+                    mode_suffix += f"+adaptive({len(docs)})"
+            if mmr_on and len(docs) > 1:
+                docs, trace = mmr_reorder(docs, trace, lambda_=mmr_lambda)
+                mode_suffix += "+mmr"
+
+            mode = base_mode + ("+rerank" if reranked else "") + mode_suffix + mode_extra
 
             # Remember the kept chunks for use on the NEXT turn. We track
             # what the chain actually selected (post-rerank), not the
