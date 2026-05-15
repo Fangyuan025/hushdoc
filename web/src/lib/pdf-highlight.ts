@@ -106,13 +106,115 @@ export function normalize(text: string): {
  *  shown in", etc.) -- 24 is a sweet spot in practice. */
 const MIN_WINDOW_CHARS = 24
 
+/** How far we'll tolerate page text drifting from chunk text during
+ *  greedy bidirectional extension. We count mismatches in a sliding
+ *  window; once `EXTEND_MISMATCH_RATIO` of the recent
+ *  `EXTEND_WINDOW_LEN` characters disagree, we stop growing in that
+ *  direction. The numbers are picked so a reflow that drops a comma
+ *  or rejoins a hyphenated word doesn't abort the extension, but a
+ *  jump to an unrelated paragraph does. */
+const EXTEND_WINDOW_LEN = 24
+const EXTEND_MISMATCH_RATIO = 0.4
+
+/** Hard cap on how far the bidirectional extension can grow past the
+ *  anchor seed: the chunk's length scaled by this factor. PDF text
+ *  layers in multi-column layouts are flattened into linear text by
+ *  pdf.js, so a naive greedy walk easily strays into the adjacent
+ *  column once the chunk's end is past. Capping at ~1.25x chunk
+ *  length keeps the highlight tight without truncating chunks that
+ *  Docling lightly re-flowed (a bit shorter than the page rendering). */
+const MAX_EXTENSION_RATIO = 1.25
+
+/** Expand a confirmed anchor match outwards in both directions so the
+ *  highlight covers the full chunk paragraph, not just the seed
+ *  window. We step character-by-character and tolerate a moderate
+ *  amount of drift -- Docling reflow drops whitespace, joins
+ *  hyphenated breaks, and occasionally re-orders punctuation, all of
+ *  which should NOT cut the highlight short. Hard mismatch (the page
+ *  has wandered into a different paragraph) terminates extension. A
+ *  hard length cap prevents the walk from straying past the chunk
+ *  text into adjacent columns / paragraphs that pdf.js flattens into
+ *  the linear text-layer stream. */
+function extendMatch(
+  pageNorm: string,
+  chunkNorm: string,
+  pageStart: number, // first matched char in page
+  pageEnd: number,   // one past last matched char in page
+  chunkStart: number,
+  chunkEnd: number,
+): { pageStart: number; pageEnd: number } {
+  const maxTotalLen = Math.ceil(chunkNorm.length * MAX_EXTENSION_RATIO)
+  // ----- extend forward
+  {
+    let pi = pageEnd
+    let ci = chunkEnd
+    const window: number[] = [] // 1 = mismatch, 0 = match
+    let mismatches = 0
+    while (pi < pageNorm.length && ci < chunkNorm.length) {
+      if (pi - pageStart >= maxTotalLen) break
+      const m = pageNorm[pi] === chunkNorm[ci] ? 0 : 1
+      window.push(m)
+      mismatches += m
+      if (window.length > EXTEND_WINDOW_LEN) {
+        mismatches -= window.shift()!
+      }
+      if (
+        window.length === EXTEND_WINDOW_LEN &&
+        mismatches / EXTEND_WINDOW_LEN > EXTEND_MISMATCH_RATIO
+      ) {
+        break
+      }
+      pi++
+      ci++
+    }
+    // Walk back past any trailing mismatched chars so the highlight
+    // ends on a real match boundary rather than mid-noise.
+    while (pi > pageEnd && window.length > 0 && window[window.length - 1] === 1) {
+      pi--
+      window.pop()
+    }
+    pageEnd = pi
+  }
+  // ----- extend backward
+  {
+    let pi = pageStart - 1
+    let ci = chunkStart - 1
+    const window: number[] = []
+    let mismatches = 0
+    while (pi >= 0 && ci >= 0) {
+      if (pageEnd - pi >= maxTotalLen) break
+      const m = pageNorm[pi] === chunkNorm[ci] ? 0 : 1
+      window.unshift(m)
+      mismatches += m
+      if (window.length > EXTEND_WINDOW_LEN) {
+        mismatches -= window.pop()!
+      }
+      if (
+        window.length === EXTEND_WINDOW_LEN &&
+        mismatches / EXTEND_WINDOW_LEN > EXTEND_MISMATCH_RATIO
+      ) {
+        break
+      }
+      pi--
+      ci--
+    }
+    while (pi < pageStart - 1 && window.length > 0 && window[0] === 1) {
+      pi++
+      window.shift()
+    }
+    pageStart = pi + 1
+  }
+  return { pageStart, pageEnd }
+}
+
 /** Try to locate a chunk inside the page by sliding fragments of
  *  decreasing length over the chunk and substring-matching each
- *  against the page. Decreasing-length tiers are tried in order; the
- *  first match wins. Within each tier we scan ALL positions in the
- *  chunk (not just head / middle / tail) because Docling re-flow
- *  occasionally drops the very piece of text we picked as our
- *  anchor. */
+ *  against the page. The first matched window becomes an anchor;
+ *  ``extendMatch`` then grows it outwards in both directions so the
+ *  full chunk paragraph (not just the 80-char anchor) gets highlighted.
+ *  Decreasing-length tiers are tried in order; within each tier we
+ *  scan all positions in the chunk because Docling re-flow can drop
+ *  the head or tail. */
 export function findChunkInPage(
   fullText: string,
   chunkText: string,
@@ -121,37 +223,42 @@ export function findChunkInPage(
   const chunk = normalize(chunkText)
   if (!chunk.norm || !page.norm) return null
 
-  // Fast path: whole chunk substring-matches.
-  let idx = page.norm.indexOf(chunk.norm)
-  let matchLen = chunk.norm.length
+  // Anchor coordinates (in NORMALISED space).
+  let pageOff = -1
+  let chunkOff = 0
+  let matchLen = 0
 
-  if (idx === -1) {
+  // Fast path: whole chunk substring-matches. Anchor + match cover
+  // everything, no extension needed.
+  const wholeIdx = page.norm.indexOf(chunk.norm)
+  if (wholeIdx !== -1) {
+    pageOff = wholeIdx
+    chunkOff = 0
+    matchLen = chunk.norm.length
+  } else {
     // Tiered window search. Tier sizes are bounded by the chunk
     // length so a short chunk doesn't try absurdly long windows.
     const len = chunk.norm.length
     const tiers = [80, 60, 40, MIN_WINDOW_CHARS].filter((w) => w <= len)
 
     outer: for (const winLen of tiers) {
-      // Step ~quarter-window so we cover the chunk densely without
-      // doing a full O(N*M) scan. The first matched position wins.
       const step = Math.max(1, Math.floor(winLen / 4))
       for (let off = 0; off + winLen <= len; off += step) {
         const win = chunk.norm.slice(off, off + winLen)
         const j = page.norm.indexOf(win)
         if (j !== -1) {
-          idx = j
+          pageOff = j
+          chunkOff = off
           matchLen = winLen
           break outer
         }
       }
-      // Always try the tail too -- a chunk that ends with a
-      // distinctive phrase but starts with boilerplate would miss
-      // every stepped position above.
       if (len >= winLen) {
         const tail = chunk.norm.slice(len - winLen)
         const j = page.norm.indexOf(tail)
         if (j !== -1) {
-          idx = j
+          pageOff = j
+          chunkOff = len - winLen
           matchLen = winLen
           break
         }
@@ -159,15 +266,26 @@ export function findChunkInPage(
     }
   }
 
-  if (idx === -1) return null
+  if (pageOff === -1) return null
 
-  // Map normalised [idx, idx+matchLen) back to original indices. Both
-  // ends include the boundary character so the highlight slightly
-  // overshoots into trailing whitespace -- harmless and avoids the
-  // off-by-one feeling where the last letter sits just outside.
-  const startOrig = page.origIndex[idx] ?? 0
+  // Bidirectional greedy extension. Stops when the page and chunk
+  // texts visibly diverge (different paragraph / outside the chunk's
+  // reach in the rendered text-layer).
+  const expanded = extendMatch(
+    page.norm,
+    chunk.norm,
+    pageOff,
+    pageOff + matchLen,
+    chunkOff,
+    chunkOff + matchLen,
+  )
+
+  // Map normalised [pageStart, pageEnd) back to original indices.
+  const startOrig = page.origIndex[expanded.pageStart] ?? 0
   const endOrigInclusive =
-    page.origIndex[Math.min(idx + matchLen - 1, page.origIndex.length - 1)] ?? startOrig
+    page.origIndex[
+      Math.min(expanded.pageEnd - 1, page.origIndex.length - 1)
+    ] ?? startOrig
   return { start: startOrig, end: endOrigInclusive + 1 }
 }
 

@@ -166,10 +166,14 @@
 .textLayer ::selection {
   background: color-mix(in oklch, var(--primary) 35%, transparent);
 }
-/* Commit 8 will add `.textLayer .chunkMatch` to paint the highlight
- * over fuzzy-matched spans. Reserved here so the class name is stable. */
+/* Chunk-match highlight: a saturated yellow marker so it stays
+ * visible on white PDF pages. Pre-v0.5.0-rc we used the primary tint
+ * with mix-blend-mode: multiply, which looked grey on light PDFs and
+ * was nearly invisible. The yellow + opacity combo mimics a physical
+ * highlighter pen and survives both light and dark page-background
+ * variants. */
 .textLayer .chunkMatch {
-  background: color-mix(in oklch, var(--primary) 30%, transparent);
+  background: rgba(255, 220, 0, 0.55);
   border-radius: 2px;
-  mix-blend-mode: multiply;
+  box-shadow: 0 0 0 1px rgba(230, 180, 0, 0.35);
 }

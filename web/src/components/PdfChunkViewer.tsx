@@ -403,26 +403,32 @@ export function PdfChunkViewer({
         </div>
       </div>
 
-      {/* Page surface */}
-      <div className="relative min-h-0 flex-1 overflow-auto bg-neutral-900/40 p-4">
+      {/* Page surface. ``items-start`` + ``min-w-max`` on the inner
+          wrapper lets the canvas scroll horizontally when zoomed past
+          the viewport width, while still horizontally-centring it
+          when it fits. ``py-6`` adds breathing room at top/bottom so
+          the top of the page isn't pinned right under the toolbar. */}
+      <div className="relative min-h-0 flex-1 overflow-auto bg-neutral-900/40">
         {error ? (
           <div className="mx-auto mt-12 max-w-md rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             Couldn't open PDF: {error}
           </div>
         ) : (
-          <div className="mx-auto inline-block bg-white shadow-2xl dark:bg-neutral-200">
-            <div className="relative">
-              <canvas
-                ref={canvasRef}
-                className={cn(
-                  "block transition-opacity",
-                  rendering && "opacity-90",
-                )}
-              />
-              <div
-                ref={textLayerRef}
-                className="textLayer absolute inset-0 select-text"
-              />
+          <div className="flex min-h-full min-w-full items-start justify-center px-4 py-6">
+            <div className="bg-white shadow-2xl dark:bg-neutral-200">
+              <div className="relative">
+                <canvas
+                  ref={canvasRef}
+                  className={cn(
+                    "block transition-opacity",
+                    rendering && "opacity-90",
+                  )}
+                />
+                <div
+                  ref={textLayerRef}
+                  className="textLayer absolute inset-0 select-text"
+                />
+              </div>
             </div>
           </div>
         )}
