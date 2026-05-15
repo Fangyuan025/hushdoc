@@ -84,8 +84,9 @@ air-gapped — Wi-Fi off, ethernet unplugged, doesn't matter.
 ## Features at a glance
 
 #### Documents
-- **PDF, DOCX, and image** ingestion — tables, code blocks, math, and
-  hand-written pages all preserved.
+- **PDF, DOCX, EPUB, and image** ingestion — tables, code blocks,
+  math, and hand-written pages all preserved. EPUB chapters land as
+  separate "page" units so citations point at the right chapter.
 - **Drag-and-drop** upload. Multi-file. Replace-or-append toggle.
 - **Search scope:** restrict any question to a specific subset of files
   with one click; leave it empty to search everything.
@@ -95,6 +96,14 @@ air-gapped — Wi-Fi off, ethernet unplugged, doesn't matter.
   and proper LaTeX math rendering.
 - **Inline citations** as `[file p.5]` chips that link back to the
   exact retrieved excerpt — nothing made up, nothing hidden.
+- **PDF citation viewer** *(v0.5.0)* — click *open* on any source card
+  to render the cited page on a built-in pdf.js canvas and watch the
+  exact chunk light up in **yellow highlighter** over the matched
+  spans. Page navigation, 50–200% zoom, Esc to dismiss.
+- **Multi-variant regenerate** *(v0.5.0)* — the regenerate button
+  appends a new answer as a variant on the same bubble. Step between
+  versions with a ChatGPT-style `< N/M >` pager; whichever variant is
+  active becomes the prior reply seen by the next follow-up.
 - **Bilingual** (中 / EN) — Hushdoc detects your question's language
   and answers in the same one, even if your documents are in the other.
 - **Multi-conversation history,** auto-titled after the first turn.
@@ -136,6 +145,10 @@ air-gapped — Wi-Fi off, ethernet unplugged, doesn't matter.
   panel with the cited chunks + a *Retrieval* tab showing every
   candidate the bi-encoder fetched, with `rank_before → rank_after`
   + cross-encoder score + a ★ on rows the answer actually used.
+  Trace rows are colour-tagged by retrieval channel — sky `dense`,
+  amber `bm25`, emerald `both`, violet `memory` (carried over from
+  earlier turns) — so you can see at a glance which channel pulled
+  its weight on a given query.
 - **Regenerate** / **copy** buttons on assistant messages.
 
 ---
@@ -292,9 +305,25 @@ choices that make it actually usable:
   *"which of these is about ML?"* because chunks alone don't carry
   document themes. Hushdoc summarises each file once at ingest and
   prepends a *Documents in scope* overview to every prompt.
-- **Balanced multi-doc retrieval.** When 2+ files are selected, the
-  retrieval budget is split per filename so a wordy doc can't crowd
-  the others out.
+- **Hybrid retrieval (BM25 + dense + RRF).** *(v0.5.0)* An in-process
+  BM25 index runs alongside the embedding-based search and the two
+  candidate lists fuse via Reciprocal Rank Fusion. Catches the exact
+  filenames / model versions / error codes the bi-encoder flattens
+  away. Mode is selectable via `HUSHDOC_RETRIEVAL_MODE=hybrid|dense|bm25`
+  (default `hybrid`).
+- **GPU embedding auto-detect.** *(v0.5.0)* Embedding model and
+  cross-encoder reranker pick CUDA when it's available, CPU
+  otherwise. Override with `HUSHDOC_EMBED_DEVICE=cpu|cuda`.
+- **Persistent session-chunk memory.** *(v0.5.0)* The rolling window
+  of chunks the chain selected in earlier turns is exported into the
+  conversation JSON and rehydrated on backend restart, so the very
+  first follow-up after a reboot still benefits from the +memory(N)
+  retrieval boost.
+- **Balanced multi-doc retrieval.** When 2+ files are selected in
+  dense mode, the retrieval budget is split per filename so a wordy
+  doc can't crowd the others out. Hybrid mode achieves the same
+  effect organically — BM25 naturally surfaces rarely-mentioned
+  docs that dense would drown out.
 - **Cross-encoder reranker.** Bi-encoder fetches a wider candidate
   set; a stronger cross-encoder rescores them. Spend the latency
   where it matters — final ordering.
@@ -323,8 +352,9 @@ Stack: **FastAPI** (Python 3.12) + **React 19** + **Vite** +
 hushdoc/
 ├── server/          FastAPI backend (routes, conv store, SSE adapter)
 ├── web/             React + Vite frontend (components, hooks, lib)
-├── ingest.py        Docling parsing + HybridChunker
-├── vector_store.py  ChromaDB + balanced retrieval
+├── ingest.py        Docling parsing + HybridChunker + EPUB extractor
+├── vector_store.py  ChromaDB + balanced + hybrid retrieval
+├── bm25_index.py    in-memory BM25 corpus + RRF fusion helper
 ├── reranker.py      cross-encoder over-fetch + rescore
 ├── llm_chain.py     RAGChain — streaming, scope, follow-up, voice
 ├── llama_server.py  llama-server.exe lifecycle manager
