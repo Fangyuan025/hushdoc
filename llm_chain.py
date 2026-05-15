@@ -44,6 +44,7 @@ from llama_server import (
     DEFAULT_MODEL_PATH as SERVER_DEFAULT_MODEL_PATH,
 )
 import doc_summaries
+from chain_grounding import bind_answer_to_sources, bindings_to_payload
 
 logger = logging.getLogger("llm_chain")
 if not logger.handlers:
@@ -1359,6 +1360,9 @@ class RAGChain:
         # that points at nothing.
         answer_text = sanitize_answer_citations(answer_text, len(all_docs))
         cited = filter_sources_by_inline_ids(all_docs, answer_text)
+        sentence_bindings = bindings_to_payload(
+            bind_answer_to_sources(answer_text, cited)
+        )
 
         return {
             "question": question,
@@ -1368,6 +1372,7 @@ class RAGChain:
             "all_source_documents": all_docs,
             "chitchat": False,
             "scope": list(filenames) if filenames else None,
+            "sentence_bindings": sentence_bindings,
         }
 
     def ask_no_memory(
@@ -1597,6 +1602,13 @@ class RAGChain:
             )
             entry["cited"] = key in cited_keys
 
+        # v0.6.0: per-sentence binding of the answer to specific
+        # paragraphs inside the cited chunks. The frontend renders each
+        # [N] chip with a hover popover containing the matched paragraph.
+        sentence_bindings = bindings_to_payload(
+            bind_answer_to_sources(cleaned, cited)
+        )
+
         yield ("done", {
             "question": question,
             "standalone_question": standalone,
@@ -1608,6 +1620,10 @@ class RAGChain:
             # v0.2.0: per-candidate retrieval trace for the UI's drawer.
             "retrieval_trace": trace,
             "retrieval_mode": state.get("retrieval_mode", ""),
+            # v0.6.0: sentence-level grounding for the inline citation
+            # hover popover. List of {text, start, end, citations[],
+            # paragraphs[{prompt_id, filename, page, paragraph, score}]}.
+            "sentence_bindings": sentence_bindings,
         })
 
     # ----------------------------------------------------------- summaries
