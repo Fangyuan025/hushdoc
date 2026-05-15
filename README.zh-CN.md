@@ -15,6 +15,13 @@
   <a href="https://www.trychroma.com/"><img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-FFCD42.svg?style=for-the-badge"></a>
 </p>
 
+<p align="center">
+  <a href="README.md">English</a> · <b>中文</b>
+  &nbsp;|&nbsp;
+  <a href="https://github.com/Fangyuan025/hushdoc/releases">Releases</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
 > **和你的文档对话——本地、离线、不出你这台电脑。**
 
 把 PDF、DOCX、EPUB、甚至一张书页的照片丢进来。用中文或英文随便问。

@@ -15,6 +15,13 @@
   <a href="https://www.trychroma.com/"><img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-FFCD42.svg?style=for-the-badge"></a>
 </p>
 
+<p align="center">
+  <b>English</b> · <a href="README.zh-CN.md">中文</a>
+  &nbsp;|&nbsp;
+  <a href="https://github.com/Fangyuan025/hushdoc/releases">Releases</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
 > **Chat with your documents — privately, offline, on your own machine.**
 
 Drop in a PDF, DOCX, EPUB, or even a phone photo of a page. Ask anything
