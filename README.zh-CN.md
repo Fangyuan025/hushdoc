@@ -1,346 +1,149 @@
 # 🤫 Hushdoc
 
 <p align="center">
-  <a href="https://github.com/Fangyuan025/hushdoc/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/Fangyuan025/hushdoc?style=for-the-badge&color=2ea44f"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow.svg?style=for-the-badge"></a>
-  <a href="#为什么叫hushdoc"><img alt="Local-only" src="https://img.shields.io/badge/local--only-1f6feb.svg?style=for-the-badge&logo=ghostery&logoColor=white"></a>
-  <a href="#功能一览"><img alt="Bilingual" src="https://img.shields.io/badge/bilingual-zh%20%2B%20en-7c3aed.svg?style=for-the-badge&logo=googletranslate&logoColor=white"></a>
+  <a href="https://github.com/Fangyuan025/hushdoc/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Fangyuan025/hushdoc?style=for-the-badge&color=2ea44f"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-yellow.svg?style=for-the-badge"></a>
+  <a href="#why"><img alt="Local-only" src="https://img.shields.io/badge/本地--only-1f6feb.svg?style=for-the-badge&logo=ghostery&logoColor=white"></a>
+  <a href="README.md"><img alt="English" src="https://img.shields.io/badge/English-7c3aed.svg?style=for-the-badge&logo=googletranslate&logoColor=white"></a>
 </p>
 
 <p align="center">
   <a href="https://www.python.org/"><img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776AB.svg?style=for-the-badge&logo=python&logoColor=white"></a>
   <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688.svg?style=for-the-badge&logo=fastapi&logoColor=white"></a>
   <a href="https://react.dev/"><img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB.svg?style=for-the-badge&logo=react&logoColor=000"></a>
-  <a href="https://vite.dev/"><img alt="Vite" src="https://img.shields.io/badge/Vite-646CFF.svg?style=for-the-badge&logo=vite&logoColor=white"></a>
   <a href="https://github.com/ggml-org/llama.cpp"><img alt="llama.cpp" src="https://img.shields.io/badge/llama-cpp-FF6B6B.svg?style=for-the-badge"></a>
-  <a href="https://www.trychroma.com/"><img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-vectors-FFCD42.svg?style=for-the-badge"></a>
-</p>
-
-<p align="center">
-  <a href="README.md">English</a> · <b>中文</b>
-  &nbsp;|&nbsp;
-  <a href="https://github.com/Fangyuan025/hushdoc/releases">Releases</a> ·
-  <a href="CHANGELOG.md">Changelog</a>
+  <a href="https://www.trychroma.com/"><img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-FFCD42.svg?style=for-the-badge"></a>
 </p>
 
 > **和你的文档对话——本地、离线、不出你这台电脑。**
 
-把 PDF、Word 文档、甚至一张书页的手机照片丢进来，用中文或英文随便问。
-答案逐字流式返回，每条都带原文出处。**没有任何上传**——一切都在你自己的机器上完成。
+把 PDF、DOCX、EPUB、甚至一张书页的照片丢进来。用中文或英文随便问。
+答案带行内引用流式出来，**PDF 引文查看器**会用黄色高亮直接画出原文。
+**没有任何东西离开你的机器。**
 
-```
-🛡️ 本地优先    🚀 GPU 加速    🌍 中英双语    🎙️ 可选语音模式
-```
-
----
-
-## 你能用它做什么
-
-- **30 秒读完一篇 200 页论文。** 把 PDF 拖进去，问"总结核心发现"——
-  几秒后拿到一段带页码引用的回答。
-- **左右对照两份合同 / 两篇论文 / 两份报告。** 在侧边栏勾选两份文件，
-  问"它们在哪里观点不一致"——Hushdoc 会平衡两份文档的检索预算，
-  不会让其中一份"压住"另一份。
-- **找回一个你记得读过的细节。** "第四章里关于预算说了什么？"——
-  回答带 `[文件 p.12]` 的引用 chip，原文在哪一目了然。
-- **OCR 一张手机拍的书页。** 手写笔记、教材某一页——JPG / PNG /
-  TIFF / BMP 都能自动 OCR 后入库。
-- **语音问答。** 按住麦克风按钮说话，听到答案被读出来。
-  （目前仅英文。）
-- **对话历史归档。** 多对话存档 + 自动生成标题，跟 ChatGPT 一样，
-  侧边栏直接切换。
+`🛡️ 本地优先` · `🚀 GPU 加速` · `🌍 中 / EN` · `🎙️ 语音（英文）`
 
 ---
 
-## 为什么叫"Hushdoc"？
+## 为什么 <a id="why"></a>
 
-大多数 AI 文档工具会把你的文件传到别人的云上。这对一份公开 PDF
-没什么——但合同、病历、未发表的手稿、任何 NDA 涵盖的内容，都不应该
-那样处理。Hushdoc 是为了让你**永远不用做这个权衡**而做的。
+大多数 AI 文档工具会把你的文件传到别人的云上。对公开 PDF 无所谓，
+但对合同、未发表手稿、NDA 范围内的内容就不行了。
 
-| | 云端 RAG（ChatGPT / Claude / Gemini） | Hushdoc |
+| | 云端 RAG | Hushdoc |
 |---|---|---|
-| 文档存在哪？ | 它们的服务器 | 你自己的硬盘 |
-| 推理跑在哪？ | 它们的 GPU | 你自己的 GPU（或 CPU） |
-| 飞机上 / 内网 / 断网时能用？ | ❌ | ✅ |
-| 一次性下载模型后免费？ | ❌ | ✅ |
-| 对话记录归你所有？ | ❌ | ✅ |
+| 文档存哪 | 它们的服务器 | 你自己的硬盘 |
+| 推理跑在哪 | 它们的 GPU | 你自己的 GPU / CPU |
+| 能离线用吗 | ❌ | ✅ |
+| 对话历史属于谁 | ❌ | ✅ |
 
-Hushdoc **唯一**的网络请求是首次启动时从 HuggingFace 下载 embedding、
-ASR、TTS 三个模型。下载完成进缓存之后，可以**完全断网运行**——
-拔网线、关 Wi-Fi 都不影响。
+唯一的联网请求是 HuggingFace 上嵌入 / ASR / TTS 模型的**一次性**下载。
+之后拔网线也能用。
 
 ---
 
-## 功能一览
+## 功能
 
-#### 文档
-- **PDF、DOCX、EPUB、图片** 全支持——表格、代码块、数学公式、手写
-  页都能正确保留结构。EPUB 章节作为独立的"page"单位入库，引用直接
-  落到对应章节号。
-- **拖拽** 上传，多文件，支持"替换/追加"切换。
-- **检索范围（Search scope）**：一键将提问限定到某几个文件；不勾选
-  默认对全库检索。
+**文档** — PDF · DOCX · EPUB · 图片（OCR）。拖拽上传、多文件、
+替换/追加切换。每文件 `Search scope` 勾选。
 
-#### 对话
-- **流式回答**，带 markdown、代码高亮、GFM 表格、LaTeX 数学公式渲染。
-- **行内引用** `[文件 p.5]` 直接链回原文片段——既不编造，也不藏。
-- **PDF 引文查看器** *(v0.5.0)*——在 Sources 卡片上点 *open*，
-  通过内置的 pdf.js 在 canvas 上渲染对应页，chunk 文本会用**荧光黄
-  高亮**直接画到匹配的字符 span 上。翻页、50–200% 缩放，Esc 关闭。
-- **多版本 regenerate** *(v0.5.0)*——重新生成不再覆盖旧答案，
-  而是在同一气泡上挂一个新版本，用 ChatGPT 风格的 `< N/M >` 翻页器
-  在不同版本间切换；当前选中的版本会作为下一轮 follow-up 看到的
-  "上一条助手回复"。
-- **中英双语**——Hushdoc 检测你提问的语言，**用同一种语言回答**，
-  哪怕你的文档是另一种语言。
-- **多对话历史**，第一轮结束后自动生成标题。侧边栏列表点击切换、
-  二次点击删除。
+**对话** — 流式 markdown 答案，带代码高亮、表格、LaTeX 公式。行内
+`[文件 p.5]` 引用 chip 链回原文 chunk。中英双语——用什么语言问就
+用什么语言答。多对话侧边栏 + 第一轮自动起标题。
 
-#### 语音（默认关闭）
-- 聊天框旁的**按住说话**麦克风按钮，~1.5 秒静默自动停录，不用手动结束。
-- **流式 TTS**——回答**还在生成时**就会按句子边读边播，没有"全部生成完
-  再开始读"的尴尬停顿。
-- 历史回答旁边的 🔊 图标可以**回放**之前合成过的音频。
+**PDF 引文查看器** — Source 卡片上点 *open*，浏览器内置 pdf.js
+渲染对应页，chunk 文本用**荧光黄**直接覆盖在匹配的字符 span 上。
+翻页、50–200% 缩放、Esc 关闭。
 
-#### 设置（标题栏 ⚙ 齿轮）
-- **运行时切换模型。** 在 *Model file* 里粘贴任意 `.gguf` 路径，
-  点 *Save* —— 后端会停掉当前的 `llama-server.exe` 并用新模型重启，
-  整个保存动作返回时新模型已经 ready。文件不存在或不是 `.gguf` 会被
-  当场拒绝（HTTP 400），原来跑着的 chain 不受影响。
-- **退出自动清理。** 一个 checkbox。勾上后关浏览器会自动清掉
-  `chat_history/` + `data/uploads/` + `chroma_db/` 并**直接关终端**，
-  不问任何问题。不勾（默认）走原来的按类别确认流程。
-- 设置持久化到 `./hushdoc_config.json`（已 gitignored）。
+**多版本 regenerate** — 重生成把新答案以 variant 形式挂到同一气泡上，
+用 ChatGPT 风格 `< N/M >` 翻页器切换。当前选中的版本会作为下一轮
+follow-up 看到的"上一条助手回复"。
 
-#### 细节
-- **深色模式**——是真正适合夜间看的炭灰，不是死黑。
-- **键盘快捷键：** `Ctrl/Cmd + K` 聚焦输入框，`Ctrl/Cmd + L` 新建对话,
-  `Esc` 取消。
-- **一键启动**（`hushdoc.bat`）：自动启服务、开浏览器，关浏览器后
-  会问你要不要清理本地数据——按类别 opt-in。（想跳过确认？
-  Settings → *Auto-cleanup on exit*。）
-- **Library**：拖文件 / 选文件夹 / 粘贴文本入库；单文件删除 + 来源
-  徽章（`uploaded` / `folder` / `typed`）。多文件 ingest 可中途取消。
-- **Sources 抽屉**：点引用 chip 滑出右侧面板，含已引用 chunk + *Retrieval*
-  tab 展示每个候选的 `rank_before → rank_after` + cross-encoder 分数，
-  实际被引用的 row 带 ★。Trace 每行带彩色 channel 徽章——天蓝
-  `dense` / 琥珀 `bm25` / 翠绿 `both` / 紫罗兰 `memory`（从前一轮
-  对话带过来的）——一眼看出哪个通道在这条查询上起作用。
-- **Regenerate** / **Copy** 按钮放在助手消息底下。
+**语音（默认关）** — 按住说话麦克风（~1.5 秒静默自动停录）+ 流式
+TTS 边生成边读。仅英文。
+
+**设置** — 在线粘贴 `.gguf` 路径即可换模型；关浏览器自动清本地数据
+（可选）。配置存到 `hushdoc_config.json`。
 
 ---
 
 ## 快速开始
 
-环境要求：
-
-- Windows 10 / 11（Linux / macOS 用 `dev.sh`，详见下方"备注"）
-- [Python 3.12](https://www.python.org/downloads/release/python-3120/)
-  （安装时勾上 *Add to PATH*）
-- [Node.js 20+](https://nodejs.org/)（LTS 版即可）
-- **~10 GB 空闲硬盘**（完整安装）。大致分布：
-  - `.venv/` — Python 依赖（~6 GB；其中 ~4.4 GB 是 PyTorch CUDA 版）
-  - `~/.cache/huggingface/` — embedding + Whisper + Kokoro + Docling
-    版式 / 表格模型（~1.3 GB，首次使用时按需下载）
-  - `models/model.gguf` — 默认 LLM（~1.2 GB）
-  - `runtime/` — `llama-server.exe` + DLLs（GPU 版 ~750 MB，CPU 版 ~50 MB）
-  - `web/node_modules/` — 前端依赖（~200 MB）
-- NVIDIA 显卡**可选**——能加速大模型，但默认的 Qwen3-1.7B 在 CPU 上
-  也跑得很顺。
-
-### 拿稳定版
-
-需要经过测试的快照版本，去
-[Releases 页](https://github.com/Fangyuan025/hushdoc/releases) 下载最新
-release 的 source archive（zip 或 tar.gz），解压后按下面的 `setup.bat`
-/ `setup.sh` 继续即可。想要最新功能就直接 clone `master`。
-
-### 简单做法：双击两次（Windows）
+需要：**Windows 10/11、Linux、或 macOS** · Python 3.12 · Node 20+
+· ~10 GB 空闲磁盘。NVIDIA GPU 可选（自动检测）。
 
 ```powershell
-.\setup.bat        # 一次性：装依赖、下载 runtime 和模型
-.\hushdoc.bat      # 之后每次启动用这个
+# Windows -- 双击这两个就够了
+.\setup.bat        # 一次性：venv、npm install、llama-server、默认模型
+.\hushdoc.bat      # 之后每次启动
 ```
 
-`setup.bat` 全自动可重跑。它会：
-
-1. 创建 Python venv（`.venv\`）并 `pip install` 所有依赖
-2. 跑 `npm install` 装前端依赖
-3. 检测你是否有 NVIDIA 显卡，自动选对应版本的 `llama-server.exe`
-   下载到 `.\runtime\`：
-   - **检测到 GPU：** CUDA 12.4 build（~205 MB）+ cudart 运行时 DLL
-     （~373 MB）——大模型也能飞快推理
-   - **没 GPU：** CPU build（~15 MB）——任何机器都能跑，对默认 1.7B
-     模型来说足够快
-4. 从 [HuggingFace](https://huggingface.co/MaziyarPanahi/Qwen3-1.7B-GGUF)
-   下载默认模型 **Qwen3-1.7B Q4_K_M**（~1.2 GB）到 `.\models\model.gguf`
-
-每一步都会先检查"是否已经做过"，做过就跳过，所以 `git pull` 之后
-重跑 setup 是安全的。
-
-> **覆盖 GPU/CPU 自动判断：**
-> - `.\setup.bat -Cpu` 强制 CPU build（下载小，CUDA 装坏时也能跑）。
-> - `.\setup.bat -GpuBuild` 强制 CUDA build（即使 `nvidia-smi` 不在 PATH 上）。
-> - `.\setup.bat -Force` 重新下载 runtime 和 model（比如 llama.cpp
->   升级后）。**不会**重建 venv。
-
-### macOS / Linux
-
 ```bash
+# macOS / Linux
 chmod +x setup.sh dev.sh
 ./setup.sh         # 一次性
 ./dev.sh           # 之后每次启动
 ```
 
-`setup.sh` 跟 `setup.bat` 步骤等价：venv、npm install、Linux 上
-auto-detect NVIDIA GPU（→ CUDA 版 `llama-server`），macOS 或
-没 GPU 的机器自动 fallback CPU 版，下同样的 Qwen3-1.7B 模型。
-`--cpu` / `--gpu-build` / `--force` 三个 flag 跟 Windows 版一一对应。
+`setup` 是幂等的——`git pull` 后再跑一次只会处理变动的部分。会根据
+`nvidia-smi` 自动选 CUDA 或 CPU 版的 `llama-server`，可用
+`-Cpu` / `-GpuBuild` / `-Force`（Windows）或 `--cpu` / `--gpu-build`
+/ `--force`（Unix）强制。默认模型是 Qwen3-1.7B Q4_K_M（~1.2 GB）。
 
-> 退出时的自动清理询问目前**只**在 Windows `hushdoc.bat` 里实现。
-> `dev.sh` 能起服务但 Ctrl+C 后不会弹清理 prompt，要手动收拾。
+启动后浏览器自动开 <http://localhost:5173>。**首条回答约 15 秒**
+（模型预热），之后秒级流式。
 
-### 想换更大的模型？
+### 换其他模型
 
-三种等价做法，哪个顺手用哪个：
+三种等价方法：
 
-1. **设置页（运行时热切换，无需重启）。** 点标题栏 ⚙ 齿轮，把任意
-   `.gguf` 路径粘进 *Model file*，点 *Save*。Hushdoc 会停掉当前的
-   `llama-server.exe`，对新模型起一个新进程，下一条 chat 就走新权重。
-   文件不存在或后缀不是 `.gguf` 会当场拒绝保存。
-2. **替换文件。** 把你的 `.gguf` 放到 `./models/model.gguf`（覆盖默认
-   下载的 Qwen3-1.7B），重启 Hushdoc。
-3. **环境变量。** 启动前 `LLAMA_MODEL_PATH=/path/to/your.gguf`。
+1. 设置 ⚙ → 粘贴任意 `.gguf` 路径 → *Save*。Hushdoc 热切换
+   `llama-server`，不用重启。
+2. 放一个 `.gguf` 到 `./models/model.gguf` 然后重启。
+3. 启动前 `LLAMA_MODEL_PATH=/path/to/your.gguf`。
 
-按内存挑示例：
-
-- **Qwen3-4B Q4_K_M**（~2.5 GB）——推理更强，8 GB 内存就能跑
-- **Mistral-7B-Instruct Q4_K_M**（~4.5 GB）——英文场景的强基线
-- **Llama-3.1-8B Q4_K_M**（~4.7 GB）——综合能力很好
-
-> **关于 prompt：** system prompt 里嵌了 Qwen3 的 `/no_think` 软开关
-> （用来禁用 Qwen3 的 `<think>...</think>` 推理块）。非 Qwen3 的 chat
-> template 不识别这个 token，所以换 Llama / Mistral / Phi / Qwen2.5 等
-> **直接就能用**——开头那 9 个字符会被它们的 tokenizer 静默丢掉。
-> Streaming 阶段还有一个独立的 `<think>` 过滤器兜底（对 DeepSeek-R1 /
-> QwQ 这类 reasoning 模型有意义），所以无论换什么模型，**用户看到的
-> 回答都是干净的**。
-
-### 手动安装（不想用脚本）
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-cd web && npm install && cd ..
-# 然后自己下载 llama-server.exe 和 .gguf，分别放到
-# .\runtime\llama-server.exe 和 .\models\model.gguf 后启动：
-.\hushdoc.bat
-```
-
----
-
-启动完成后 Hushdoc 会在默认浏览器打开 <http://localhost:5173>。
-往侧边栏拖一个 PDF 然后开问。
-
-> **第一条回答会等 10–20 秒**（模型 warm-up），之后每条都几乎
-> 立刻开始流式输出。
-
----
-
-## 使用建议
-
-- **大文档要问得具体。** "第三章的结论是什么？"比"把这篇论文都讲一遍"
-  好得多。
-- **文件多的时候用 scope。** 在 *Search scope* 面板勾选 1–3 个具体文件，
-  回答会更准更快。
-- **追问可以自然问。** "能展开讲讲吗？"或"为什么？"会被自动结合上下文，
-  Hushdoc 内部把它改写成独立完整的问题再去检索。
-- **Sources 面板只显示真正被引用的片段。** 没用到的 chunk 不会被凑数。
-- **关浏览器自动停服务**，并询问要不要清理本地数据（对话 / 上传文件 /
-  向量索引）——按类别 *n* 保留、*y* 清掉。想跳过确认直接清空？
-  Settings → *Auto-cleanup on exit*。
+Hushdoc 走的是 OpenAI 兼容的 llama.cpp API，任何 llama.cpp 能加载的
+模型都行：Qwen3-4B、Mistral-7B、Llama-3.1-8B、DeepSeek-R1 等。推理
+模型的 `<think>` 块会被自动剥掉。
 
 ---
 
 ## 实现细节
 
-给好奇的人——Hushdoc 不只是 "embed and pray"。让它真正可用的几个
-工程决定：
+让 Hushdoc 不止"embed-and-pray"的几个工程决定：
 
-- **每文档级摘要缓存。** 单纯 top-k 检索回答不了 "哪一份是讲机器
-  学习的？" 因为 chunk 本身不带文档级主题。Hushdoc 在入库时给每个
-  文件做一次 LLM 摘要，回答时把"当前 scope 内的文档摘要"一并放进
-  prompt。
-- **混合检索（BM25 + dense + RRF）。** *(v0.5.0)* 进程内的 BM25
-  索引和向量检索并行跑，两条候选用 Reciprocal Rank Fusion 融合。
-  能抓住 bi-encoder 投影后会丢的精确字符串（文件名、模型版本号、
-  错误码等）。模式可由 `HUSHDOC_RETRIEVAL_MODE=hybrid|dense|bm25`
-  切换，默认 `hybrid`。
-- **GPU 嵌入自动检测。** *(v0.5.0)* 嵌入模型和 cross-encoder reranker
-  有 CUDA 用 CUDA，没有就走 CPU。`HUSHDOC_EMBED_DEVICE=cpu|cuda` 可强制。
-- **跨重启的会话级 chunk 记忆。** *(v0.5.0)* 之前轮选中的 chunk
-  滚动窗口会写进对话 JSON，后端重启时还原，重启后第一个 follow-up
-  也能用到 +memory(N) 的检索加成。
-- **多文档平衡检索。** 2 个以上文件在 scope 时，dense 模式下检索
-  预算按文件名均分，话多的那份不会盖过另一份。Hybrid 模式天然有
-  类似效果——BM25 通道会自然抬升被冷落的文档。
-- **Cross-encoder 重排。** Bi-encoder 先粗召回更宽的候选，强一点的
-  cross-encoder 再精排——把延迟花在真正影响最终结果的环节上。
-- **逐轮语言指令。** 小模型容易往文档语言漂。Hushdoc 检测你提问的
-  语言，把指令塞在 prompt 的最末位置——这是小模型最听话的 token slot。
-- **行内 `<think>` 剥离。** 推理模型的 `<think>` 块在 streaming 阶段
-  就被状态机吃掉，即使开/闭标签被切到两个 token chunk 里也能正确处理。
-- **心跳驱动关停。** 浏览器每 10 秒 ping 一次后端；关 tab 之后心跳
-  停下，后端自动退出，启动器接着进入清理询问流程。
+- **混合检索。** BM25 + dense 向量并行召回，用 Reciprocal Rank Fusion
+  融合。能抓住 bi-encoder 投影后丢失的精确字符串（文件名、版本号、
+  错误码等）。`HUSHDOC_RETRIEVAL_MODE=hybrid|dense|bm25` 可切换。
+- **Cross-encoder 重排。** Bi-encoder 粗召回更宽，cross-encoder
+  精排——延迟花在最影响最终结果的环节。
+- **每文档级摘要缓存。** 每个文件入库时做一次 LLM 摘要，每次回答都
+  注入 prompt，让"哪一份是讲 X 的？"这类问题能答。
+- **会话级 chunk 记忆。** 前几轮选中的 chunk 会被混回 follow-up 的
+  候选池，跨后端重启持久化。
+- **GPU 嵌入自动检测**（embedding + reranker），`HUSHDOC_EMBED_DEVICE=cpu|cuda`
+  可强制。
+- **流式 `<think>` 剥离**，推理模型的思考块在生成过程中被状态机
+  实时去掉，标签被切到两个 token chunk 也能正确处理。
+- **心跳驱动关停**——关浏览器，后端自动退出，启动器进入清理询问。
 
-技术栈：**FastAPI**（Python 3.12）+ **React 19** + **Vite** +
-**Tailwind / shadcn**，通过 OpenAI 兼容的 HTTP API 调 **llama.cpp**
-独立的 `llama-server`。向量库是 **ChromaDB**，文档解析用
-**IBM Docling**。语音模式用 **Whisper-base.en**（ASR）+
-**Kokoro-82M**（TTS）。
+**技术栈：** FastAPI + React 19 + Vite + Tailwind/shadcn ·
+llama.cpp（`llama-server`）· ChromaDB · IBM Docling · 语音是
+Whisper-base.en + Kokoro-82M。
 
 ---
 
-## 项目结构
+## 说明
 
-```
-hushdoc/
-├── server/          FastAPI 后端（routes、对话存储、SSE 适配器）
-├── web/             React + Vite 前端（components、hooks、lib）
-├── ingest.py        Docling 解析 + HybridChunker + EPUB 提取
-├── vector_store.py  ChromaDB + 平衡检索 + 混合检索
-├── bm25_index.py    内存 BM25 语料 + RRF 融合
-├── reranker.py      cross-encoder 重排
-├── llm_chain.py     RAGChain——streaming、scope、follow-up、voice
-├── llama_server.py  llama-server.exe 生命周期管理
-├── doc_summaries.py 每文件摘要缓存
-├── voice.py         Whisper ASR + Kokoro TTS
-├── setup.bat / .sh  一次性安装器（依赖 + runtime + 模型）
-├── hushdoc.bat      Windows 一键启动器（带退出清理询问）
-├── dev.sh / dev.ps1 普通开发启动器（不带自动清理）
-├── VERSION          /api/health 读它，UI 角落显示版本号
-└── CHANGELOG.md
-                     （gitignored：runtime/  models/*.gguf  hushdoc_config.json）
-```
-
----
-
-## 备注
-
-- **Linux / macOS 用户：** 见上方 *macOS / Linux* 一节——
-  `setup.sh` 然后 `dev.sh`。退出清理目前只在 Windows 的 `.bat` / `.ps1`
-  流程里。
-- **纯 CPU** 也能跑——把 `LLMConfig` 里的 `n_gpu_layers` 设成 `0`。
-  首 token 慢一点，但回答质量一致。
-- **完全离线安装：** 在能联网的机器上预先下好 embedding
-  （`all-MiniLM-L6-v2`）、Whisper-base.en、Kokoro-82M 三个模型，
-  把整个 HuggingFace 缓存（`~/.cache/huggingface`）拷过去就行。
-- **语音模式仅支持英文。** Whisper-base.en 和 Kokoro-82M 都是英文
-  模型。聊天本身是完全双语的——任何时候都可以打中文。
+- **离线部署：** 把另一台联网机器的 `~/.cache/huggingface` 拷过来，
+  在 `./models/` 放个 `.gguf` 就齐了。
+- **退出自动清理**目前只在 `hushdoc.bat` / `.ps1` 里；`dev.sh` 用户
+  Ctrl+C 后手动清。
+- **语音仅英文**（Whisper-base.en + Kokoro-82M）。聊天本身完全双语。
+- 完整 release notes 看 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
 ## License
 
-MIT——见 [`LICENSE`](LICENSE)。
+MIT —— 见 [`LICENSE`](LICENSE)。

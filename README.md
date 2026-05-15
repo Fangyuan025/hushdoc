@@ -1,388 +1,156 @@
 # 🤫 Hushdoc
 
 <p align="center">
-  <a href="https://github.com/Fangyuan025/hushdoc/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/Fangyuan025/hushdoc?style=for-the-badge&color=2ea44f"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow.svg?style=for-the-badge"></a>
-  <a href="#why-hushdoc"><img alt="Local-only" src="https://img.shields.io/badge/local--only-1f6feb.svg?style=for-the-badge&logo=ghostery&logoColor=white"></a>
-  <a href="#features-at-a-glance"><img alt="Bilingual" src="https://img.shields.io/badge/bilingual-zh%20%2B%20en-7c3aed.svg?style=for-the-badge&logo=googletranslate&logoColor=white"></a>
+  <a href="https://github.com/Fangyuan025/hushdoc/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Fangyuan025/hushdoc?style=for-the-badge&color=2ea44f"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-yellow.svg?style=for-the-badge"></a>
+  <a href="#why"><img alt="Local-only" src="https://img.shields.io/badge/local--only-1f6feb.svg?style=for-the-badge&logo=ghostery&logoColor=white"></a>
+  <a href="README.zh-CN.md"><img alt="Bilingual" src="https://img.shields.io/badge/中文-7c3aed.svg?style=for-the-badge&logo=googletranslate&logoColor=white"></a>
 </p>
 
 <p align="center">
   <a href="https://www.python.org/"><img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776AB.svg?style=for-the-badge&logo=python&logoColor=white"></a>
   <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688.svg?style=for-the-badge&logo=fastapi&logoColor=white"></a>
   <a href="https://react.dev/"><img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB.svg?style=for-the-badge&logo=react&logoColor=000"></a>
-  <a href="https://vite.dev/"><img alt="Vite" src="https://img.shields.io/badge/Vite-646CFF.svg?style=for-the-badge&logo=vite&logoColor=white"></a>
   <a href="https://github.com/ggml-org/llama.cpp"><img alt="llama.cpp" src="https://img.shields.io/badge/llama-cpp-FF6B6B.svg?style=for-the-badge"></a>
-  <a href="https://www.trychroma.com/"><img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-vectors-FFCD42.svg?style=for-the-badge"></a>
-</p>
-
-<p align="center">
-  <b>English</b> · <a href="README.zh-CN.md">中文</a>
-  &nbsp;|&nbsp;
-  <a href="https://github.com/Fangyuan025/hushdoc/releases">Releases</a> ·
-  <a href="CHANGELOG.md">Changelog</a>
+  <a href="https://www.trychroma.com/"><img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-FFCD42.svg?style=for-the-badge"></a>
 </p>
 
 > **Chat with your documents — privately, offline, on your own machine.**
 
-Drop in a PDF, Word doc, or even a photo of a page, and Hushdoc lets you
-ask anything about it in plain English or Chinese. Answers stream in
-with quoted sources, in seconds. **Nothing is uploaded** — every word
-stays on your computer.
+Drop in a PDF, DOCX, EPUB, or even a phone photo of a page. Ask anything
+in English or Chinese. Answers stream in with inline citations and an
+in-app PDF viewer that highlights the exact source passage in yellow.
+**Nothing leaves your machine.**
 
-```
-🛡️ Local-first    🚀 GPU-accelerated    🌍 Bilingual    🎙️ Voice optional
-```
+`🛡️ Local-first` · `🚀 GPU-accelerated` · `🌍 中 / EN` · `🎙️ Voice (en)`
 
 ---
 
-## What you can do with it
+## Why <a id="why"></a>
 
-- **Read a 200-page paper in 30 seconds.** Drop the PDF in, ask
-  *"summarize the key findings"* — get a paragraph with citations
-  back to the exact pages.
-- **Compare two contracts / two papers / two reports side by side.**
-  Select both in the sidebar and ask *"where do these disagree?"* —
-  Hushdoc balances retrieval across files so neither one drowns out
-  the other.
-- **Find that one fact you remember reading.** *"What did chapter 4
-  say about the budget?"* — answers come back with `[file p.12]`
-  citation chips.
-- **OCR a phone photo of a page.** Hand-written notes, a textbook
-  page someone snapped — JPG / PNG / TIFF / BMP all get OCR'd and
-  indexed automatically.
-- **Voice-driven Q&A.** Hold the mic button, ask out loud, hear the
-  answer read back. (English only for now.)
-- **Keep your work organized.** Multi-conversation history with
-  auto-generated titles, just like ChatGPT — switch between threads
-  in the sidebar.
+Most AI document tools ship your files to someone else's cloud. That's
+fine for a public PDF — not fine for a contract, an unpublished
+manuscript, or anything covered by NDA. Hushdoc was built so you never
+make that trade-off.
 
----
-
-## Why "Hushdoc"?
-
-Most AI document tools ship your files to someone else's cloud. That
-might be fine for a public PDF — it is not fine for a contract, a
-medical record, an unpublished manuscript, or anything covered by
-NDA. Hushdoc was built so you never have to make that trade-off.
-
-| | Cloud RAG (ChatGPT / Claude / Gemini) | Hushdoc |
+| | Cloud RAG | Hushdoc |
 |---|---|---|
-| Where are your documents stored? | Their servers | Your disk only |
-| Where does inference run? | Their GPUs | Your GPU (or CPU) |
-| Works on a plane / in a SCIF / off-grid? | ❌ | ✅ |
-| Free after one-time model download? | ❌ | ✅ |
-| You own the conversation history? | ❌ | ✅ |
+| Documents stored on | Their servers | Your disk |
+| Inference runs on | Their GPUs | Your GPU / CPU |
+| Works air-gapped? | ❌ | ✅ |
+| You own the chat history? | ❌ | ✅ |
 
-The only network calls Hushdoc makes are the **one-time downloads** of
-the embedding, speech-to-text, and text-to-speech models from
-HuggingFace. Once those are cached, you can run completely
-air-gapped — Wi-Fi off, ethernet unplugged, doesn't matter.
+The only network calls are one-time HuggingFace downloads of the
+embedding / ASR / TTS models. After that you can pull the ethernet.
 
 ---
 
-## Features at a glance
+## Features
 
-#### Documents
-- **PDF, DOCX, EPUB, and image** ingestion — tables, code blocks,
-  math, and hand-written pages all preserved. EPUB chapters land as
-  separate "page" units so citations point at the right chapter.
-- **Drag-and-drop** upload. Multi-file. Replace-or-append toggle.
-- **Search scope:** restrict any question to a specific subset of files
-  with one click; leave it empty to search everything.
+**Documents** — PDF · DOCX · EPUB · images (OCR). Drag-and-drop,
+multi-file, replace-or-append. Per-file `Search scope` toggle.
 
-#### Chat
-- **Streaming answers** with markdown, code highlighting, GFM tables,
-  and proper LaTeX math rendering.
-- **Inline citations** as `[file p.5]` chips that link back to the
-  exact retrieved excerpt — nothing made up, nothing hidden.
-- **PDF citation viewer** *(v0.5.0)* — click *open* on any source card
-  to render the cited page on a built-in pdf.js canvas and watch the
-  exact chunk light up in **yellow highlighter** over the matched
-  spans. Page navigation, 50–200% zoom, Esc to dismiss.
-- **Multi-variant regenerate** *(v0.5.0)* — the regenerate button
-  appends a new answer as a variant on the same bubble. Step between
-  versions with a ChatGPT-style `< N/M >` pager; whichever variant is
-  active becomes the prior reply seen by the next follow-up.
-- **Bilingual** (中 / EN) — Hushdoc detects your question's language
-  and answers in the same one, even if your documents are in the other.
-- **Multi-conversation history,** auto-titled after the first turn.
-  Sidebar list, click to switch, click-to-confirm delete.
+**Chat** — Streaming markdown answers with code, tables, and LaTeX.
+Inline `[file p.5]` citations link back to the exact retrieved chunk.
+Bilingual (中/EN) — answers in the language you asked in. Multi-thread
+sidebar with auto-titled conversations.
 
-#### Voice (opt-in)
-- **Push-to-talk** mic button beside the chat input. Auto-stops on
-  ~1.5 s of silence so you don't have to babysit it.
-- **Streaming TTS** — the answer is read aloud sentence-by-sentence
-  *while it's still being generated*, no awkward pause at the end.
-- **Replay** any prior answer with the 🔊 icon next to the message.
+**PDF citation viewer** — Click *open* on any source card → in-browser
+pdf.js renders the cited page and the chunk text lights up in **yellow
+highlighter** over the matched spans. Page nav, 50–200% zoom, Esc to
+close.
 
-#### Settings (⚙ gear in the header)
-- **Swap models live.** Type a new GGUF path, hit *Save* — the
-  backend stops the running `llama-server.exe` and restarts it
-  against the new model before the response returns, so a
-  successful toast really means "loaded and ready". Bad paths are
-  rejected up front (HTTP 400) without disturbing the running chain.
-- **Auto-cleanup on exit.** A single checkbox. When on, closing the
-  browser tells the launcher to wipe `chat_history/` +
-  `data/uploads/` + `chroma_db/` silently and close the terminal
-  with no prompts. When off (default) the per-category confirm
-  flow runs as before.
-- Settings persist to `./hushdoc_config.json` (gitignored).
+**Multi-variant regenerate** — Regenerate appends a new answer as a
+variant on the same bubble; flip between versions with a
+ChatGPT-style `< N/M >` pager. The active variant is what the next
+follow-up sees as the prior reply.
 
-#### Polish
-- **Dark mode** that's actually comfortable at night (charcoal, not
-  the typical inky black).
-- **Keyboard shortcuts:** `Ctrl/Cmd + K` to focus input, `Ctrl/Cmd + L`
-  for new chat, `Esc` cancels.
-- **One-click launcher** (`hushdoc.bat`) starts everything, opens the
-  browser, and on exit asks whether to wipe your local data —
-  per-category, opt-in. (Skip the prompts: Settings → *Auto-cleanup
-  on exit*.)
-- **Library**: drop or pick files / a whole folder / pasted text;
-  per-file delete + metadata badges (`uploaded` / `folder` /
-  `typed`). Multi-file ingest is cancellable mid-flight.
-- **Sources drawer**: click a citation chip to slide out a side
-  panel with the cited chunks + a *Retrieval* tab showing every
-  candidate the bi-encoder fetched, with `rank_before → rank_after`
-  + cross-encoder score + a ★ on rows the answer actually used.
-  Trace rows are colour-tagged by retrieval channel — sky `dense`,
-  amber `bm25`, emerald `both`, violet `memory` (carried over from
-  earlier turns) — so you can see at a glance which channel pulled
-  its weight on a given query.
-- **Regenerate** / **copy** buttons on assistant messages.
+**Voice (opt-in)** — Push-to-talk mic (~1.5 s silence auto-stop) +
+streaming TTS that reads each sentence as it's generated. English only.
+
+**Settings** — Live model swap by typing a new `.gguf` path; auto-clean
+local data on browser close (opt-in checkbox). Persists to
+`hushdoc_config.json`.
 
 ---
 
 ## Quick start
 
-You need:
-
-- Windows 10 / 11 (Linux / macOS works via `dev.sh` — see Notes)
-- [Python 3.12](https://www.python.org/downloads/release/python-3120/)
-  (tick *Add to PATH* during install)
-- [Node.js 20+](https://nodejs.org/) (LTS is fine)
-- **~10 GB free disk** for a complete install. Roughly:
-  - `.venv/` — Python deps (~6 GB; ~4.4 GB of that is PyTorch w/ CUDA)
-  - `~/.cache/huggingface/` — embedding + Whisper + Kokoro + Docling
-    layout/table models (~1.3 GB, downloaded lazily on first use)
-  - `models/model.gguf` — default LLM (~1.2 GB)
-  - `runtime/` — `llama-server.exe` + DLLs (~750 MB GPU build, ~50 MB CPU)
-  - `web/node_modules/` — frontend deps (~200 MB)
-- An NVIDIA GPU is **optional** — speeds up large models, but the
-  default Qwen3-1.7B runs comfortably on CPU.
-
-### Get a stable build
-
-For a tested snapshot, download the source archive from the latest
-[release](https://github.com/Fangyuan025/hushdoc/releases) (zip or
-tar.gz), extract, and continue with `setup.bat` / `setup.sh` below.
-For bleeding-edge features clone `master` instead.
-
-### The easy way: two double-clicks (Windows)
+Requirements: **Windows 10/11, Linux, or macOS** · Python 3.12 ·
+Node 20+ · ~10 GB free disk. NVIDIA GPU optional (auto-detected).
 
 ```powershell
-.\setup.bat        # one-time: installs deps + downloads runtime + model
-.\hushdoc.bat      # every time after: launches the app
+# Windows -- double-click these in order
+.\setup.bat        # one-time: venv, npm install, llama-server, default model
+.\hushdoc.bat      # every time after
 ```
 
-`setup.bat` is fully automatic and re-runnable. It will:
-
-1. Create the Python venv (`.venv\`) and `pip install` everything
-2. Run `npm install` for the frontend
-3. Detect whether you have an NVIDIA GPU and pick the right
-   `llama-server.exe` build into `.\runtime\`:
-   - **GPU detected:** CUDA 12.4 build (~205 MB) + matching cudart
-     runtime DLLs (~373 MB) — fast inference, drop-in for larger models
-   - **No GPU:** CPU build (~15 MB) — works everywhere, plenty fast for
-     the default 1.7B model
-4. Download the default model **Qwen3-1.7B Q4_K_M** (~1.2 GB) from
-   [HuggingFace](https://huggingface.co/MaziyarPanahi/Qwen3-1.7B-GGUF)
-   into `.\models\model.gguf`
-
-Each step skips itself if it's already done, so you can re-run setup
-safely after `git pull`.
-
-> **Override the GPU/CPU pick:**
-> - `.\setup.bat -Cpu` forces the CPU build (smaller download, useful
->   if your CUDA install is broken).
-> - `.\setup.bat -GpuBuild` forces the CUDA build even when `nvidia-smi`
->   isn't on PATH.
-> - `.\setup.bat -Force` re-downloads the runtime and model (e.g. after
->   a llama.cpp upgrade). Does **not** recreate the venv.
-
-### macOS / Linux
-
 ```bash
+# macOS / Linux
 chmod +x setup.sh dev.sh
 ./setup.sh         # one-time
 ./dev.sh           # every time after
 ```
 
-`setup.sh` mirrors `setup.bat` end-to-end: venv, npm install,
-auto-detects an NVIDIA GPU on Linux (CUDA build of `llama-server`),
-falls back to CPU on macOS / no-GPU machines, downloads the same
-Qwen3-1.7B model. Same `--cpu` / `--gpu-build` / `--force` overrides.
+`setup` is idempotent — re-run after `git pull` and only the dirty
+steps re-execute. It auto-picks CUDA or CPU build of `llama-server`
+based on `nvidia-smi`; override with `-Cpu` / `-GpuBuild` / `-Force`
+(Windows) or `--cpu` / `--gpu-build` / `--force` (Unix). Default model
+is Qwen3-1.7B Q4_K_M (~1.2 GB).
 
-> Auto-cleanup-on-exit currently lives only in the Windows `hushdoc.bat`
-> flow. `dev.sh` starts the stack but you'll Ctrl+C to stop and clean
-> up by hand.
+The app opens at <http://localhost:5173>. **First answer takes
+~15 s** (model warmup); subsequent ones stream in within a second.
 
-### Want a different / larger model?
+### Use a different model
 
-Three equivalent ways (pick whichever feels easiest):
+Three equivalent paths:
 
-1. **Settings page (live swap, no restart).** Click the ⚙ gear in
-   the header, paste any `.gguf` path into *Model file*, hit *Save*.
-   Hushdoc stops the running `llama-server.exe`, starts a fresh one
-   against the new model, and the next chat hits the new weights.
-   The save is rejected if the file isn't there or isn't `.gguf`.
-2. **Replace the file.** Drop your `.gguf` at `./models/model.gguf`
-   (overwriting the default Qwen3-1.7B) and restart Hushdoc.
-3. **Environment variable.** `LLAMA_MODEL_PATH=/path/to/your.gguf`
-   before launching.
+1. Settings ⚙ → paste any `.gguf` path → *Save*. Hushdoc hot-swaps
+   `llama-server` with no restart.
+2. Drop a `.gguf` at `./models/model.gguf` and re-launch.
+3. `LLAMA_MODEL_PATH=/path/to/your.gguf` before launching.
 
-Examples sized to common RAM tiers:
-
-- **Qwen3-4B Q4_K_M** (~2.5 GB) — better reasoning, still fits on 8 GB RAM
-- **Mistral-7B-Instruct Q4_K_M** (~4.5 GB) — strong English baseline
-- **Llama-3.1-8B Q4_K_M** (~4.7 GB) — excellent general model
-
-> **Note on prompts:** the system prompts include Qwen3's `/no_think` soft
-> switch (which suppresses Qwen3's `<think>...</think>` reasoning block).
-> Non-Qwen3 chat templates ignore this token, so swapping in Llama /
-> Mistral / Phi / Qwen2.5 etc. **just works** — the 9-character prefix
-> is silently dropped by their tokenizers. A separate streaming filter
-> strips any `<think>` blocks that do leak through (relevant for
-> reasoning models like DeepSeek-R1 / QwQ), so the user-visible answer
-> is always clean regardless of model family.
-
-### Manual setup (if you'd rather not use the script)
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-cd web && npm install && cd ..
-# Then download a llama-server.exe and a .gguf yourself, place at
-# .\runtime\llama-server.exe and .\models\model.gguf, and launch:
-.\hushdoc.bat
-```
-
----
-
-After setup, Hushdoc opens in your default browser at
-<http://localhost:5173>. Drop a PDF in the sidebar and ask away.
-
-> **First answer takes 10–20 s** while the model warms up. Subsequent
-> answers stream in within a second.
-
----
-
-## Tips
-
-- **Big documents work best when you ask focused questions.** "What
-  does section 3 conclude?" beats "tell me everything in this paper."
-- **Use scope when you have many files.** Selecting 1–3 specific
-  documents in the *Search scope* panel makes answers tighter and
-  faster.
-- **Follow-ups work naturally.** *"Can you elaborate?"* or *"为什么?"*
-  is understood in context — Hushdoc rewrites them into standalone
-  questions internally.
-- **The Sources panel only shows what was actually cited.** If
-  Hushdoc didn't use a chunk, it won't pad the citation list with it.
-- **Closing the browser auto-stops the server** and offers to clean
-  up your local data (conversations / uploads / vector index) — say
-  *no* to keep things, *y* to wipe. Want it to skip the prompts and
-  always wipe? Settings → *Auto-cleanup on exit*.
+Hushdoc speaks the OpenAI-compatible llama.cpp API, so anything llama.cpp
+loads works: Qwen3-4B, Mistral-7B, Llama-3.1-8B, DeepSeek-R1, etc.
+Reasoning-model `<think>` blocks are stripped automatically.
 
 ---
 
 ## Under the hood
 
-For the curious — Hushdoc isn't just "embed and pray." A few engineering
-choices that make it actually usable:
+A few engineering choices that take Hushdoc past "embed-and-pray":
 
-- **Per-document summary cache.** Pure top-k retrieval can't answer
-  *"which of these is about ML?"* because chunks alone don't carry
-  document themes. Hushdoc summarises each file once at ingest and
-  prepends a *Documents in scope* overview to every prompt.
-- **Hybrid retrieval (BM25 + dense + RRF).** *(v0.5.0)* An in-process
-  BM25 index runs alongside the embedding-based search and the two
-  candidate lists fuse via Reciprocal Rank Fusion. Catches the exact
-  filenames / model versions / error codes the bi-encoder flattens
-  away. Mode is selectable via `HUSHDOC_RETRIEVAL_MODE=hybrid|dense|bm25`
-  (default `hybrid`).
-- **GPU embedding auto-detect.** *(v0.5.0)* Embedding model and
-  cross-encoder reranker pick CUDA when it's available, CPU
-  otherwise. Override with `HUSHDOC_EMBED_DEVICE=cpu|cuda`.
-- **Persistent session-chunk memory.** *(v0.5.0)* The rolling window
-  of chunks the chain selected in earlier turns is exported into the
-  conversation JSON and rehydrated on backend restart, so the very
-  first follow-up after a reboot still benefits from the +memory(N)
-  retrieval boost.
-- **Balanced multi-doc retrieval.** When 2+ files are selected in
-  dense mode, the retrieval budget is split per filename so a wordy
-  doc can't crowd the others out. Hybrid mode achieves the same
-  effect organically — BM25 naturally surfaces rarely-mentioned
-  docs that dense would drown out.
-- **Cross-encoder reranker.** Bi-encoder fetches a wider candidate
-  set; a stronger cross-encoder rescores them. Spend the latency
-  where it matters — final ordering.
-- **Per-turn language directive.** Small models drift toward whatever
-  the documents are written in. Hushdoc detects your language and
-  pins the answer language at the prompt's most-recent-token slot —
-  the one small models obey most reliably.
-- **Inline reasoning stripper.** Reasoning-model `<think>` blocks
-  are removed *while streaming*, even when the open or close tag is
-  split across two token chunks.
-- **Heartbeat-driven shutdown.** The browser pings a heartbeat every
-  few seconds. Close the tab, the server self-exits, and the
-  launcher's cleanup prompt kicks in.
+- **Hybrid retrieval.** BM25 + dense embedding fuse via Reciprocal Rank
+  Fusion. Catches exact filenames / model versions / error codes the
+  bi-encoder flattens. Mode via `HUSHDOC_RETRIEVAL_MODE=hybrid|dense|bm25`.
+- **Cross-encoder reranker.** Wider bi-encoder recall, then cross-encoder
+  rescore — latency where it matters.
+- **Per-document summary cache.** Each file gets one LLM summary at
+  ingest, fed into every prompt so "which of these is about X?" works.
+- **Session chunk memory.** Chunks from earlier turns get mixed back into
+  the candidate pool on follow-ups, persisted across backend restarts.
+- **GPU auto-detect** for the embedding + reranker; override via
+  `HUSHDOC_EMBED_DEVICE=cpu|cuda`.
+- **Streaming `<think>` stripper** for reasoning models (state machine
+  survives split tokens).
+- **Heartbeat shutdown** — close the browser, the server self-exits and
+  the launcher offers to wipe local data.
 
-Stack: **FastAPI** (Python 3.12) + **React 19** + **Vite** +
-**Tailwind / shadcn**, talking to **llama.cpp**'s standalone
-`llama-server` over its OpenAI-compatible HTTP API. Vector store is
-**ChromaDB**. Document parsing is **IBM Docling**. Voice uses
-**Whisper-base.en** (ASR) and **Kokoro-82M** (TTS).
-
----
-
-## Project layout
-
-```
-hushdoc/
-├── server/          FastAPI backend (routes, conv store, SSE adapter)
-├── web/             React + Vite frontend (components, hooks, lib)
-├── ingest.py        Docling parsing + HybridChunker + EPUB extractor
-├── vector_store.py  ChromaDB + balanced + hybrid retrieval
-├── bm25_index.py    in-memory BM25 corpus + RRF fusion helper
-├── reranker.py      cross-encoder over-fetch + rescore
-├── llm_chain.py     RAGChain — streaming, scope, follow-up, voice
-├── llama_server.py  llama-server.exe lifecycle manager
-├── doc_summaries.py per-file summary cache
-├── voice.py         Whisper ASR + Kokoro TTS
-├── setup.bat / .sh  one-time installer (deps + runtime + model)
-├── hushdoc.bat      Windows one-click launcher with cleanup prompt
-├── dev.sh / dev.ps1 plain dev launchers (no auto-cleanup)
-├── VERSION          read by /api/health and shown in the UI footer
-└── CHANGELOG.md
-                     (gitignored: runtime/  models/*.gguf  hushdoc_config.json)
-```
+**Stack:** FastAPI + React 19 + Vite + Tailwind/shadcn ·
+llama.cpp (`llama-server`) · ChromaDB · IBM Docling · Whisper-base.en
++ Kokoro-82M for voice.
 
 ---
 
 ## Notes
 
-- **Linux / macOS users:** see the *macOS / Linux* section above —
-  `setup.sh` then `dev.sh`. Auto-cleanup currently lives in the
-  `.bat` / `.ps1` flow only.
-- **CPU-only** also works — set `n_gpu_layers=0` in `LLMConfig`. First
-  token will take longer; quality is identical.
-- **Air-gapped install:** pre-download the embedding (`all-MiniLM-L6-v2`),
-  Whisper-base.en, and Kokoro-82M models on a connected machine, copy
-  the HuggingFace cache (`~/.cache/huggingface`) over, and you're set.
-- **Voice mode is English only** for now — Whisper-base.en and
-  Kokoro-82M are both English-only models. The chat itself is fully
-  bilingual; you can type in Chinese any time.
+- **Air-gapped install:** copy `~/.cache/huggingface` from a connected
+  machine, drop a `.gguf` at `./models/`, and you're set.
+- **Auto-cleanup on exit** currently lives in `hushdoc.bat` / `.ps1`
+  only; `dev.sh` users Ctrl+C and clean up by hand.
+- **Voice is English-only** (Whisper-base.en + Kokoro-82M). Text chat
+  is fully bilingual.
+- Full release notes in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
