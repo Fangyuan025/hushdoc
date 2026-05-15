@@ -59,49 +59,109 @@ interface ChatMessageProps {
   onOpenSource?: (binding: ParagraphBinding) => void
 }
 
-// v0.6.0: walk markdown-rendered children, replace any `[N]` text with
-// a hover-popover citation chip. Recursive so it works inside <strong>,
-// <em>, list items, table cells, etc. Code blocks are left alone (we
-// avoid injecting components into `code` / `pre` overrides).
+// v0.6.0: walk markdown-rendered children, replace [N] text with
+// hover citation chips AND wrap ungrounded-sentence ranges in a
+// .ungrounded span (wavy amber underline). Recursive so it works
+// inside <strong>, <em>, list items, table cells, etc. Code blocks
+// are left alone (we avoid injecting into `code` / `pre`).
 const CITATION_PATTERN = /\[(\d{1,3})\]/g
+
+type Marker =
+  | { type: "chip"; start: number; end: number; id: number }
+  | { type: "ungrounded"; start: number; end: number; text: string }
 
 function renderWithCitations(
   children: React.ReactNode,
   bindings: Map<number, ParagraphBinding>,
+  ungroundedSentences: string[],
   onOpenSource?: (b: ParagraphBinding) => void,
 ): React.ReactNode {
   return React.Children.map(children, (child, childIdx) => {
     if (typeof child === "string") {
-      const parts: React.ReactNode[] = []
-      let last = 0
+      const markers: Marker[] = []
+      // 1) chip markers
       let m: RegExpExecArray | null
       CITATION_PATTERN.lastIndex = 0
       while ((m = CITATION_PATTERN.exec(child)) !== null) {
-        if (m.index > last) parts.push(child.slice(last, m.index))
-        const id = parseInt(m[1], 10)
-        parts.push(
-          <CitationChip
-            key={`cit-${childIdx}-${m.index}`}
-            id={id}
-            binding={bindings.get(id)}
-            onOpenSource={onOpenSource}
-          />,
-        )
-        last = m.index + m[0].length
+        markers.push({
+          type: "chip",
+          start: m.index,
+          end: m.index + m[0].length,
+          id: parseInt(m[1], 10),
+        })
       }
-      if (last < child.length) parts.push(child.slice(last))
-      return parts.length > 0 ? parts : child
+      // 2) ungrounded-sentence markers. Each sentence's text is a
+      // substring of the answer; we look for it in this text node. A
+      // sentence may not span this text node (markdown chunking) — if
+      // so the indexOf returns -1 and we skip. Wrap each match.
+      for (const sentText of ungroundedSentences) {
+        if (!sentText) continue
+        let from = 0
+        while (true) {
+          const idx = child.indexOf(sentText, from)
+          if (idx === -1) break
+          markers.push({
+            type: "ungrounded",
+            start: idx,
+            end: idx + sentText.length,
+            text: sentText,
+          })
+          from = idx + sentText.length
+        }
+      }
+      if (markers.length === 0) return child
+      // Sort by start; resolve same-start ties favouring ungrounded
+      // wrappers (they're outer) over chips.
+      markers.sort((a, b) =>
+        a.start - b.start || (a.type === "ungrounded" ? -1 : 1),
+      )
+      // Drop overlapping markers preferring the earlier one.
+      const kept: Marker[] = []
+      let furthest = 0
+      for (const mk of markers) {
+        if (mk.start < furthest) continue
+        kept.push(mk)
+        furthest = mk.end
+      }
+      const parts: React.ReactNode[] = []
+      let cursor = 0
+      for (const mk of kept) {
+        if (mk.start > cursor) parts.push(child.slice(cursor, mk.start))
+        if (mk.type === "chip") {
+          parts.push(
+            <CitationChip
+              key={`cit-${childIdx}-${mk.start}`}
+              id={mk.id}
+              binding={bindings.get(mk.id)}
+              onOpenSource={onOpenSource}
+            />,
+          )
+        } else {
+          parts.push(
+            <span
+              key={`ung-${childIdx}-${mk.start}`}
+              className="ungrounded"
+              title="This sentence couldn't be matched to a specific source — double-check it"
+            >
+              {mk.text}
+            </span>,
+          )
+        }
+        cursor = mk.end
+      }
+      if (cursor < child.length) parts.push(child.slice(cursor))
+      return parts
     }
     if (React.isValidElement(child)) {
-      // Skip code / pre / a — citation markers inside fenced code or
-      // explicit links should stay as raw text.
       const tag = (child.type as string) || ""
       if (tag === "code" || tag === "pre" || tag === "a") return child
       const props = child.props as { children?: React.ReactNode }
       if (props.children !== undefined) {
         return React.cloneElement(child, {
           ...props,
-          children: renderWithCitations(props.children, bindings, onOpenSource),
+          children: renderWithCitations(
+            props.children, bindings, ungroundedSentences, onOpenSource,
+          ),
         } as React.HTMLAttributes<HTMLElement>)
       }
     }
@@ -144,6 +204,27 @@ export function ChatMessage({
       }
     }
     return map
+  }, [msg.sentenceBindings])
+
+  // v0.6.0: sentences whose binding pass returned neither a model [N]
+  // nor an auto-injected one. These are pure synthesis / connector
+  // sentences OR potentially fabricated claims -- we underline them
+  // with a wavy amber line so the user knows to verify.
+  const ungroundedSentences = useMemo(() => {
+    const out: string[] = []
+    for (const sb of msg.sentenceBindings || []) {
+      // Skip short discourse markers ("In summary,") -- the binding
+      // pass already excluded them from auto-citation so they'd be
+      // flagged ungrounded by definition, which is too noisy.
+      if (
+        sb.citations.length === 0
+        && sb.paragraphs.length === 0
+        && sb.text.length >= 30
+      ) {
+        out.push(sb.text)
+      }
+    }
+    return out
   }, [msg.sentenceBindings])
 
   const onCopy = async () => {
@@ -191,27 +272,27 @@ export function ChatMessage({
                     // renderWithCitations.
                     p: ({ node, children, ...rest }) => (
                       <p {...rest}>
-                        {renderWithCitations(children, bindingsById, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
                       </p>
                     ),
                     li: ({ node, children, ...rest }) => (
                       <li {...rest}>
-                        {renderWithCitations(children, bindingsById, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
                       </li>
                     ),
                     td: ({ node, children, ...rest }) => (
                       <td {...rest}>
-                        {renderWithCitations(children, bindingsById, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
                       </td>
                     ),
                     th: ({ node, children, ...rest }) => (
                       <th {...rest}>
-                        {renderWithCitations(children, bindingsById, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
                       </th>
                     ),
                     blockquote: ({ node, children, ...rest }) => (
                       <blockquote {...rest}>
-                        {renderWithCitations(children, bindingsById, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
                       </blockquote>
                     ),
                   }}

@@ -189,3 +189,20 @@
     -4px 0 0 0 color-mix(in oklch, var(--primary) 75%, transparent);
   border-radius: 0 2px 2px 0;
 }
+
+/* v0.6.0 ungrounded sentence marker. A sentence is "ungrounded" when
+ * the chain's sentence-binding pass couldn't match it against any
+ * cited chunk's paragraph above the auto-cite threshold. These are
+ * the model's own synthesis or potentially-fabricated claims; we
+ * mark them with a soft wavy underline (amber-ish, not red) so the
+ * user knows "double-check this" without it screaming. */
+.ungrounded {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: rgba(217, 119, 6, 0.55); /* amber-600 / 55% */
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.dark .ungrounded {
+  text-decoration-color: rgba(252, 211, 77, 0.55); /* amber-300 / 55% */
+}
