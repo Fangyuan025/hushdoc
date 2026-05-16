@@ -35,7 +35,30 @@ export function CitationChip({
   onOpenSource,
 }: CitationChipProps) {
   const [open, setOpen] = useState(false)
+  // v0.6.1: where to put the popover. Defaults to "below" but flips
+  // to "above" when the chip is close to the viewport bottom, so a
+  // citation on the final sentence of an answer doesn't pop into an
+  // off-screen abyss. We pick the side at open-time based on the
+  // chip's bounding rect; close + re-open re-evaluates.
+  const [placement, setPlacement] = useState<"below" | "above">("below")
+  const chipRef = useRef<HTMLButtonElement | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Heuristic popover height (max-h-[12rem] for body + header + footer
+  // + paddings). Doesn't have to be exact — we just need the flip
+  // decision to be right when the chip is < ~280px from the bottom.
+  const ESTIMATED_POPOVER_PX = 280
+  const computePlacement = () => {
+    const el = chipRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    if (spaceBelow < ESTIMATED_POPOVER_PX && spaceAbove > spaceBelow) {
+      setPlacement("above")
+    } else {
+      setPlacement("below")
+    }
+  }
   const cancelClose = () => {
     if (closeTimer.current) {
       clearTimeout(closeTimer.current)
@@ -56,11 +79,15 @@ export function CitationChip({
       className="relative inline-block align-baseline"
       onMouseEnter={() => {
         cancelClose()
-        if (!unresolved) setOpen(true)
+        if (!unresolved) {
+          computePlacement()
+          setOpen(true)
+        }
       }}
       onMouseLeave={scheduleClose}
     >
       <button
+        ref={chipRef}
         type="button"
         className={cn(
           "mx-0.5 inline-flex h-[1.05em] min-w-[1.5em] items-center",
@@ -78,7 +105,10 @@ export function CitationChip({
           // a link.
           e.preventDefault()
           e.stopPropagation()
-          if (!unresolved) setOpen((o) => !o)
+          if (!unresolved) {
+            computePlacement()
+            setOpen((o) => !o)
+          }
         }}
         title={
           unresolved
@@ -92,6 +122,7 @@ export function CitationChip({
       {open && binding && (
         <CitationPopover
           binding={binding}
+          placement={placement}
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
           onOpenSource={onOpenSource}
@@ -103,11 +134,13 @@ export function CitationChip({
 
 function CitationPopover({
   binding,
+  placement,
   onMouseEnter,
   onMouseLeave,
   onOpenSource,
 }: {
   binding: ParagraphBinding
+  placement: "below" | "above"
   onMouseEnter: () => void
   onMouseLeave: () => void
   onOpenSource?: (binding: ParagraphBinding) => void
@@ -116,8 +149,15 @@ function CitationPopover({
     <div
       role="tooltip"
       className={cn(
-        "absolute left-1/2 top-[calc(100%+6px)] z-30 w-[min(420px,calc(100vw-2rem))]",
+        "absolute left-1/2 z-30 w-[min(420px,calc(100vw-2rem))]",
         "-translate-x-1/2",
+        // v0.6.1: flip placement when the chip is too close to the
+        // viewport bottom. Below uses top-[calc(100%+6px)]; above
+        // anchors to bottom-[calc(100%+6px)] so the popover floats
+        // upward.
+        placement === "below"
+          ? "top-[calc(100%+6px)]"
+          : "bottom-[calc(100%+6px)]",
         "rounded-lg border bg-popover px-3 py-2.5 text-popover-foreground",
         "shadow-lg",
         // Subtle entrance: pdf citations are read fast, no big anim.

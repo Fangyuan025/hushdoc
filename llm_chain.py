@@ -740,8 +740,18 @@ def sanitize_answer_citations(answer_text: str, max_id: int) -> str:
     """Strip ``[N]`` whose N is outside ``[1, max_id]`` -- those are
     hallucinated citations the user shouldn't see (rendering them would
     let the model fabricate references that don't resolve to anything).
-    Leaves valid citations untouched."""
-    if not answer_text or max_id <= 0:
+    Leaves valid citations untouched.
+
+    ``max_id == 0`` is a special case used by the chitchat path: no
+    chunks were retrieved, so every ``[N]`` is hallucinated. We strip
+    them all. Empty text returns unchanged.
+
+    After stripping, we tidy the leftover whitespace: the model
+    normally writes ``...claim [2].`` so removing the tag leaves
+    ``...claim .`` — visually awkward. We collapse the ``\\s+[.,;:!?]``
+    pattern back to a clean punctuation, and squeeze any double spaces
+    introduced by inline removals."""
+    if not answer_text:
         return answer_text
 
     def _repl(m: re.Match) -> str:
@@ -751,7 +761,11 @@ def sanitize_answer_citations(answer_text: str, max_id: int) -> str:
             return ""
         return m.group(0) if 1 <= n <= max_id else ""
 
-    return _INLINE_CITATION_RE.sub(_repl, answer_text)
+    out = _INLINE_CITATION_RE.sub(_repl, answer_text)
+    # Tidy: " ." → ".", " ," → ",", etc. and squeeze doubled spaces.
+    out = re.sub(r" +([.,;:!?。！？])", r"\1", out)
+    out = re.sub(r"  +", " ", out)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1357,6 +1371,9 @@ class RAGChain:
             except Exception as exc:
                 logger.exception("Chitchat chain invocation failed.")
                 raise RuntimeError("Chitchat chain failed.") from exc
+            # v0.6.1: strip stray [N] from chitchat output (see
+            # streaming-path comment for the same fix).
+            answer = sanitize_answer_citations(answer, 0)
             return {
                 "question": question,
                 "standalone_question": question,
@@ -1365,6 +1382,7 @@ class RAGChain:
                 "all_source_documents": [],
                 "chitchat": True,
                 "scope": None,
+                "sentence_bindings": [],
             }
 
         inputs: Dict[str, object] = {
@@ -1489,6 +1507,12 @@ class RAGChain:
                 yield ("token", tail)
 
             cleaned = self._strip_reasoning(full_raw)
+            # v0.6.1: chitchat replies have no retrieved chunks, so any
+            # [N] the model wrote (echoing the system-prompt example,
+            # most often) doesn't resolve to anything. Strip those
+            # tokens before they reach the UI, where they'd render as
+            # "binding not found" chips on a greeting / thank-you.
+            cleaned = sanitize_answer_citations(cleaned, 0)
             history.add_user_message(question)
             history.add_ai_message(cleaned)
 
@@ -1500,6 +1524,9 @@ class RAGChain:
                 "all_source_documents": [],
                 "chitchat": True,
                 "scope": None,
+                # Explicit empty so the frontend's binding map clears
+                # any stale data from a previous turn's state.
+                "sentence_bindings": [],
             })
             return
 

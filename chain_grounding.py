@@ -274,18 +274,65 @@ def _longest_run_overlap(a: str, b: str) -> int:
     return best
 
 
+# Tokens that show up everywhere in academic prose and shouldn't
+# dominate the Jaccard score. Tiny static list — full stop-words
+# would slow things down without helping much, since the longest-
+# run-overlap branch already handles the "real phrase match" signal.
+_STOP_TOKENS = {
+    "the", "a", "an", "and", "or", "but", "of", "in", "on", "for", "with",
+    "to", "is", "are", "was", "were", "be", "been", "by", "that", "this",
+    "these", "those", "it", "its", "as", "at", "from", "their", "they",
+    "we", "our", "us", "you", "your", "i", "he", "she", "have", "has",
+    "had", "do", "does", "did", "will", "would", "could", "should",
+}
+
+_ENTITY_RE = re.compile(
+    # Capitalised word runs ("Privacy Paradox", "P3", "ChatGPT", "Lin")
+    r"\b[A-Z][A-Za-z0-9]*\b"
+    # Numbers / decimals / percentages ("0.303", "47", "20-30")
+    r"|\b\d+(?:[.,-]\d+)?%?\b"
+    # Chinese 2+ char runs — likely names / domain terms
+    r"|[一-鿿]{2,}"
+)
+
+
+def _entities(text: str) -> set:
+    """Distinctive surface tokens that should carry more weight than
+    common dictionary words when scoring sentence-vs-paragraph match.
+    Picks proper-noun-looking runs (capitalised), numbers, percentages,
+    and Chinese 2+ char sequences. Lowercased so 'P3' matches 'p3'.
+    """
+    if not text:
+        return set()
+    return {m.group(0).lower() for m in _ENTITY_RE.finditer(text)}
+
+
 def _score_paragraph(sentence: str, paragraph: str) -> float:
-    """0..1 score combining token Jaccard + longest-run-overlap."""
-    s_tokens = _tokens(sentence)
-    p_tokens = _tokens(paragraph)
+    """0..1 score: weighted blend of Jaccard (sans stop-tokens),
+    longest-run substring, and entity overlap. The shift from
+    v0.6.0's pure-Jaccard-plus-tiny-run-bonus is that runs and
+    entities now lead — they're the signals that actually correspond
+    to "this sentence quotes / paraphrases this paragraph", whereas
+    Jaccard noise from generic words ("the", "is", "and") used to
+    let nearly-empty paragraphs win the auto-citation lottery."""
+    s_tokens = [t for t in _tokens(sentence) if t not in _STOP_TOKENS]
+    p_tokens = [t for t in _tokens(paragraph) if t not in _STOP_TOKENS]
     jaccard = _jaccard(s_tokens, p_tokens)
-    # Token Jaccard tends to undershoot when the sentence is short or
-    # has many stop-tokens. Boost by exact-phrase overlap, normalised
-    # to a small bonus (16-char run ≈ +0.16) so jaccard still
-    # dominates the ordering.
+    # Exact-phrase match — a 16-char run is a strong signal, a 64-
+    # char run is near-quote. Boost up to +0.5.
     run = _longest_run_overlap(sentence, paragraph)
-    run_bonus = min(0.3, run / 100.0)
-    return min(1.0, jaccard + run_bonus)
+    run_bonus = min(0.5, run / 50.0)
+    # Entity overlap (numbers / proper nouns / CJK terms): if the
+    # sentence mentions "P3" or "0.303" and the paragraph contains
+    # them too, that's almost-conclusive evidence -- boost up to
+    # +0.35.
+    s_ent = _entities(sentence)
+    p_ent = _entities(paragraph)
+    entity_overlap = 0.0
+    if s_ent:
+        entity_overlap = len(s_ent & p_ent) / len(s_ent)
+    entity_bonus = entity_overlap * 0.35
+    return min(1.0, 0.4 * jaccard + run_bonus + entity_bonus)
 
 
 # ---------------------------------------------------------------------------
@@ -445,60 +492,81 @@ def resolve_citations(
     answer_text: str,
     kept_docs: List[Document],
     *,
-    auto_min_score: float = 0.18,
-    max_auto_per_sentence: int = 1,
+    auto_min_score: float = 0.22,
+    override_margin: float = 1.4,
 ) -> tuple[str, List[SentenceBinding]]:
-    """v0.6.0 hybrid citation resolution.
+    """v0.6.1 unified citation resolution.
 
-    Path A (model cited): if the answer already has at least one
-    well-resolved ``[N]`` (id within range + score-able), trust the
-    model. We still scan EVERY sentence and attach the best paragraph
-    for each existing ``[N]`` so the popover has content; sentences
-    without [N] tags pass through untouched.
+    Earlier (v0.6.0) we ran two disjoint paths: "model cited [N] → trust
+    everything blindly" or "model didn't cite → auto-inject". The blind
+    trust meant a lazy model that stamped ``[1]`` after every sentence
+    pinned the entire answer to chunk 1 even when chunks 2-5 were the
+    real source. This routine merges both paths into a per-sentence
+    verify-and-reroute:
 
-    Path B (model didn't cite): walk every sentence; for each factual
-    sentence (long enough, not a pure discourse marker), score it
-    against every kept chunk's paragraphs, and if the best score
-    clears ``auto_min_score``, append ``[N]`` to that sentence right
-    before its terminator. Returns the rewritten answer text + a full
-    SentenceBinding list ready for the popover.
+    For every factual sentence:
+      1. Score it against every kept chunk's best paragraph.
+      2. Identify the chunk with the BEST score (best_pid).
+      3. If the model wrote [N] for this sentence:
+         - Score sentence against chunk N's best paragraph (model_score).
+         - If best_score > auto_min_score AND
+              best_pid != N AND
+              best_score >= override_margin * model_score
+           → REPLACE [N] with [best_pid].
+           Else → keep the model's [N], bind to chunk N's best paragraph.
+      4. If the model didn't cite this sentence and best_score >=
+         auto_min_score: inject [best_pid] before the terminator.
+      5. Otherwise: pass through, mark ungrounded.
 
-    Either way the contract is: every ``[N]`` in the returned answer
-    text resolves to a real chunk in ``kept_docs``, and the
-    SentenceBinding paragraphs match the (filename, page) of the
-    chunks the user will see as sources.
+    Net effect: the model's "[1] everywhere" laziness gets diversified
+    automatically (sentences where chunk 3 is materially better than
+    chunk 1 get rewritten), and the popover always shows the paragraph
+    the binding actually scored highest on -- not just the chunk's
+    leading paragraph.
     """
     if not answer_text or not kept_docs:
         return answer_text, []
 
-    # Resolve [N] → doc by prompt_id (same map shape as
-    # bind_answer_to_sources).
+    # Resolve prompt_id -> doc up front.
     by_id: Dict[int, Document] = {}
     for d in kept_docs:
         pid = (d.metadata or {}).get("prompt_id")
         if isinstance(pid, int) and pid not in by_id:
             by_id[pid] = d
-
-    # ----- Path A check: does the answer carry any in-range [N]?
-    raw_ids = parse_inline_citations(answer_text) if "parse_inline_citations" in globals() else []
-    # We're in a different module from parse_inline_citations; import it here.
-    if not raw_ids:
-        try:
-            from llm_chain import parse_inline_citations as _pic  # type: ignore
-            raw_ids = _pic(answer_text)
-        except Exception:
-            raw_ids = []
-    in_range_ids = [n for n in raw_ids if n in by_id]
-    model_cited = len(in_range_ids) > 0
-
-    if model_cited:
-        # Trust the model -- just produce bindings for what's there.
-        # bind_answer_to_sources already does the right thing.
-        return answer_text, bind_answer_to_sources(answer_text, kept_docs)
-
-    # ----- Path B: auto-citation. Walk sentences; for each factual
-    # sentence find the best chunk-paragraph match and inject [N].
+    if not by_id:
+        return answer_text, []
     para_cache: Dict[int, List[str]] = {}
+
+    def _best_para_for(pid: int, sent: str) -> tuple[Optional[str], float]:
+        """Find the highest-scoring paragraph inside chunk ``pid`` for
+        ``sent``. Returns (paragraph, score)."""
+        doc = by_id.get(pid)
+        if doc is None:
+            return None, 0.0
+        if pid not in para_cache:
+            para_cache[pid] = split_paragraphs(doc.page_content)
+        paragraphs = para_cache[pid]
+        if not paragraphs:
+            return None, 0.0
+        best_p, best_s = paragraphs[0], -1.0
+        for p in paragraphs:
+            s = _score_paragraph(sent, p)
+            if s > best_s:
+                best_p, best_s = p, s
+        return best_p, max(0.0, best_s)
+
+    def _best_chunk_for(sent: str) -> tuple[Optional[int], Optional[str], float]:
+        """Across all kept chunks, find the (pid, paragraph, score)
+        triple that maximises the paragraph score for ``sent``."""
+        best_pid: Optional[int] = None
+        best_para: Optional[str] = None
+        best_score: float = 0.0
+        for pid in by_id:
+            para, score = _best_para_for(pid, sent)
+            if para is not None and score > best_score:
+                best_pid, best_para, best_score = pid, para, score
+        return best_pid, best_para, best_score
+
     sentences = split_sentences(answer_text)
     if not sentences:
         return answer_text, []
@@ -506,66 +574,141 @@ def resolve_citations(
     new_parts: List[str] = []
     cursor = 0
     out_bindings: List[SentenceBinding] = []
+
     for start, end, sent in sentences:
-        # Preserve any whitespace / leading text between the prior
-        # sentence end and this one (the splitter trims it out).
         if start > cursor:
             new_parts.append(answer_text[cursor:start])
+        cursor = end
+
+        # Parse [N] tags the model wrote inside this sentence.
+        model_ids: List[int] = []
+        seen: set = set()
+        for m in _INLINE_CITATION_RE.finditer(sent):
+            try:
+                n = int(m.group(1))
+            except ValueError:
+                continue
+            if n in seen or n not in by_id:
+                continue
+            seen.add(n)
+            model_ids.append(n)
+
         if not _is_factual_sentence(sent):
             new_parts.append(sent)
-            cursor = end
             out_bindings.append(SentenceBinding(
                 text=sent, start=start, end=end,
                 citations=[], paragraphs=[],
             ))
             continue
-        # Score against every kept chunk's paragraphs.
-        best_pid: Optional[int] = None
-        best_para: Optional[str] = None
-        best_score: float = 0.0
-        for pid, doc in by_id.items():
-            if pid not in para_cache:
-                para_cache[pid] = split_paragraphs(doc.page_content)
-            for para in para_cache[pid]:
-                score = _score_paragraph(sent, para)
-                if score > best_score:
-                    best_score = score
-                    best_pid = pid
-                    best_para = para
-        if best_pid is None or best_score < auto_min_score or best_para is None:
-            # Ungrounded sentence -- pass through unchanged. Commit 7
-            # will visually mark these in the UI.
-            new_parts.append(sent)
-            cursor = end
+
+        best_pid, best_para, best_score = _best_chunk_for(sent)
+
+        if model_ids:
+            # Verify: how well does sentence actually match the model's
+            # FIRST cited chunk? (We resolve to first-cited only -- if
+            # the model also wrote [2][3] we'll keep them as additional
+            # citations attached to their own best paragraphs.)
+            primary = model_ids[0]
+            model_para, model_score = _best_para_for(primary, sent)
+            # Reroute if a different chunk is materially better.
+            if (
+                best_pid is not None
+                and best_pid != primary
+                and best_score >= auto_min_score
+                and best_score >= override_margin * max(model_score, 0.01)
+            ):
+                # Rewrite the sentence's [primary] → [best_pid] (only
+                # the first [N] gets rewritten; secondary citations
+                # stay as-is). Drop secondary [N] for now since they
+                # weren't accurate either.
+                body_re = re.compile(r"\[(\d{1,3})\]")
+                # Replace only the FIRST [N] that matches `primary`.
+                replaced = False
+
+                def _swap(match: re.Match) -> str:
+                    nonlocal replaced
+                    if replaced:
+                        return match.group(0)
+                    try:
+                        if int(match.group(1)) == primary:
+                            replaced = True
+                            return f"[{best_pid}]"
+                    except ValueError:
+                        pass
+                    return match.group(0)
+
+                new_sent = body_re.sub(_swap, sent)
+                new_parts.append(new_sent)
+                meta = (by_id[best_pid].metadata or {})
+                out_bindings.append(SentenceBinding(
+                    text=new_sent,
+                    start=start, end=start + len(new_sent),
+                    citations=[best_pid],
+                    paragraphs=[ParagraphBinding(
+                        prompt_id=best_pid,
+                        filename=str(meta.get("filename", "")),
+                        page=meta.get("page"),
+                        paragraph=best_para or "",
+                        score=round(best_score, 4),
+                    )],
+                ))
+            else:
+                # Keep model's citations. Build bindings for each.
+                new_parts.append(sent)
+                bindings: List[ParagraphBinding] = []
+                for pid in model_ids:
+                    para, sc = _best_para_for(pid, sent)
+                    meta = (by_id[pid].metadata or {})
+                    bindings.append(ParagraphBinding(
+                        prompt_id=pid,
+                        filename=str(meta.get("filename", "")),
+                        page=meta.get("page"),
+                        paragraph=para or (
+                            para_cache.get(pid, [""])[0] if pid in para_cache else ""
+                        ),
+                        score=round(sc, 4),
+                    ))
+                out_bindings.append(SentenceBinding(
+                    text=sent, start=start, end=end,
+                    citations=model_ids,
+                    paragraphs=bindings,
+                ))
+        else:
+            # No model citation -- auto-inject if the best chunk is a
+            # convincing match. v0.6.1 raises the threshold from 0.18
+            # to 0.22 so weakly-matched chunks stop sneaking onto
+            # discourse / topic-changer sentences.
+            if (
+                best_pid is None
+                or best_para is None
+                or best_score < auto_min_score
+            ):
+                new_parts.append(sent)
+                out_bindings.append(SentenceBinding(
+                    text=sent, start=start, end=end,
+                    citations=[], paragraphs=[],
+                ))
+                continue
+            body, tail = _strip_trailing_period(sent)
+            injected = f"{body} [{best_pid}]{tail}"
+            new_parts.append(injected)
+            meta = (by_id[best_pid].metadata or {})
             out_bindings.append(SentenceBinding(
-                text=sent, start=start, end=end,
-                citations=[], paragraphs=[],
+                text=injected,
+                start=start, end=start + len(injected),
+                citations=[best_pid],
+                paragraphs=[ParagraphBinding(
+                    prompt_id=best_pid,
+                    filename=str(meta.get("filename", "")),
+                    page=meta.get("page"),
+                    paragraph=best_para,
+                    score=round(best_score, 4),
+                )],
             ))
-            continue
-        # Inject [N] right before the trailing punctuation.
-        body, tail = _strip_trailing_period(sent)
-        injected = f"{body} [{best_pid}]{tail}"
-        new_parts.append(injected)
-        cursor = end
-        meta = (by_id[best_pid].metadata or {})
-        out_bindings.append(SentenceBinding(
-            text=injected,
-            start=start,
-            end=start + len(injected),
-            citations=[best_pid],
-            paragraphs=[ParagraphBinding(
-                prompt_id=best_pid,
-                filename=str(meta.get("filename", "")),
-                page=meta.get("page"),
-                paragraph=best_para,
-                score=round(best_score, 4),
-            )],
-        ))
-    # Glue trailing whitespace after the last sentence.
+
     if cursor < len(answer_text):
         new_parts.append(answer_text[cursor:])
-    new_answer = "".join(new_parts)
-    return new_answer, out_bindings
+    return "".join(new_parts), out_bindings
 
 
 def filter_kept_docs_to_cited(

@@ -4,6 +4,67 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.6.1] — 2026-05-15
+
+Polish patch on top of v0.6.0's inline-citation rework, from real-use
+feedback. Five fixes, no new features.
+
+### Fixed — chitchat shouldn't sprout citation chips
+A greeting / thank-you / identity question returns no retrieved chunks,
+so any `[N]` the model echoes from the system-prompt example is by
+definition hallucinated. Both `ask()` and `stream()` chitchat paths
+now sanitise the answer with `max_id=0` (strips all `[N]`) and emit
+an explicit empty `sentence_bindings: []`. The frontend additionally
+gates its chip + ungrounded-underline pipeline behind `!chitchat` so
+even a stale rerender can't surface them.
+
+### Fixed — hover popover got clipped on the last-sentence chip
+When a citation chip sat near the viewport bottom, the popover (which
+extends downward by default) ran past the page edge and clipped. The
+chip now measures its bounding rect on open and flips the popover
+upward when there's less than ~280px of space below. Cleanup: useState
+remembers the chosen side until the next mouseenter so the layout
+doesn't twitch.
+
+### Fixed — every sentence pinning to `[1]`
+Small models routinely cite `[1]` after every sentence even when
+chunks 2-5 are the actual source for half of them. The earlier
+"trust the model if it cited anything" path locked that in.
+`resolve_citations` is now a unified verify-and-reroute: for every
+factual sentence we score every kept chunk's best paragraph; if a
+chunk other than the model's pick is at least `override_margin` (1.4x)
+better AND clears `auto_min_score` (raised 0.18 → 0.22), the
+sentence's `[N]` is rewritten to point at the better chunk.
+`source_documents` mirror the rewritten ids. Real-PDF smoke: a
+question that returned `[1] x7` now returns e.g. `[2] [1] [3] [2] [3]`
+— honest per-sentence attribution.
+
+### Fixed — hover-popover paragraph excerpt was often off
+`_score_paragraph` over-weighted bag-of-words Jaccard, which gave
+"the/of/and"-heavy paragraphs an unfair advantage on short sentences.
+v0.6.1 reweights: longest-substring overlap leads (up to +0.5),
+entity overlap (numbers, capitalised names, CJK proper nouns) adds
+another +0.35, Jaccard contributes only 0.4× and skips a small set
+of stop-tokens. Result: a sentence with "P3" or "ρ = 0.303" now
+binds to the paragraph that actually contains "P3" / "0.303" instead
+of a generic methodology paragraph.
+
+### Fixed — View-source highlight redundant
+The popover already shows the source paragraph verbatim; once the
+user opens the full PDF page, painting a second highlight on top of
+it just clutters the page. The View-source modal now simply
+navigates to the cited page; no marker. Saves ~150ms of fuzzy-match
+work too.
+
+### Fixed — visually-deduplicated consecutive same-chip
+When several adjacent sentences cited the same `[N]` (a common
+pattern when one chunk genuinely supports a whole paragraph), the
+rendered answer used to show `[2]. [2]. [2]. [2].` — visually
+noisy. v0.6.1 strips the `[N]` markers from all but the LAST
+sentence in each run; the underlying `sentence_bindings` data is
+untouched so the popover on the run-closing chip still reflects the
+full set.
+
 ## [0.6.0] — 2026-05-15
 
 Sources you can read inline. v0.5.0 made citations chunk-level, with

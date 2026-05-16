@@ -196,22 +196,70 @@ export function ChatMessage({
   // The same paragraph may appear in multiple sentences (e.g. a chunk
   // cited from both sentence 2 and sentence 5); we keep the first
   // occurrence — they should be identical anyway.
+  // v0.6.1: chitchat replies skip the binding map entirely so any [N]
+  // tokens that leak through from the model (echoing prompt examples)
+  // don't render as broken chips on a greeting / thank-you reply.
   const bindingsById = useMemo(() => {
     const map = new Map<number, ParagraphBinding>()
+    if (msg.chitchat) return map
     for (const sb of msg.sentenceBindings || []) {
       for (const p of sb.paragraphs) {
         if (!map.has(p.prompt_id)) map.set(p.prompt_id, p)
       }
     }
     return map
-  }, [msg.sentenceBindings])
+  }, [msg.sentenceBindings, msg.chitchat])
+
+  // v0.6.1: when several adjacent sentences cite the SAME [N] (same
+  // set, in the same order), the chips get repetitive -- a paragraph
+  // of "... finding A [2]. finding B [2]. finding C [2]." reads
+  // cleaner as "... finding A. finding B. finding C [2]." We only
+  // keep the chip on the LAST sentence in each run. The underlying
+  // sentence_bindings list is unchanged so the popover for the run-
+  // closing chip still surfaces all the bound paragraphs; we just
+  // de-duplicate the visual marker.
+  const displayContent = useMemo(() => {
+    if (msg.chitchat) return msg.content
+    const bindings = msg.sentenceBindings || []
+    if (bindings.length < 2) return msg.content
+    const sameCitations = (a: number[], b: number[]) =>
+      a.length === b.length && a.every((v, i) => v === b[i])
+    // A sentence's chip(s) should be stripped iff the next sentence
+    // cites exactly the same set of ids. Walking forward.
+    const stripRanges: Array<{ start: number; end: number }> = []
+    for (let i = 0; i < bindings.length - 1; i++) {
+      const cur = bindings[i]
+      const next = bindings[i + 1]
+      if (cur.citations.length === 0) continue
+      if (sameCitations(cur.citations, next.citations)) {
+        stripRanges.push({ start: cur.start, end: cur.end })
+      }
+    }
+    if (stripRanges.length === 0) return msg.content
+    // Apply in reverse so offsets stay valid.
+    stripRanges.sort((a, b) => b.start - a.start)
+    let text = msg.content
+    for (const r of stripRanges) {
+      const head = text.slice(0, r.start)
+      const range = text.slice(r.start, r.end)
+      const tail = text.slice(r.end)
+      // Strip the [N] tags AND the single space that typically
+      // precedes them ("...claim [2]." -> "...claim.").
+      const cleaned = range.replace(/ ?\[\d{1,3}\]/g, "")
+      text = head + cleaned + tail
+    }
+    return text
+  }, [msg.content, msg.sentenceBindings, msg.chitchat])
 
   // v0.6.0: sentences whose binding pass returned neither a model [N]
   // nor an auto-injected one. These are pure synthesis / connector
   // sentences OR potentially fabricated claims -- we underline them
   // with a wavy amber line so the user knows to verify.
+  // v0.6.1: chitchat skips ungrounded marking too; greetings don't
+  // need a "double-check this" hint.
   const ungroundedSentences = useMemo(() => {
     const out: string[] = []
+    if (msg.chitchat) return out
     for (const sb of msg.sentenceBindings || []) {
       // Skip short discourse markers ("In summary,") -- the binding
       // pass already excluded them from auto-citation so they'd be
@@ -225,7 +273,7 @@ export function ChatMessage({
       }
     }
     return out
-  }, [msg.sentenceBindings])
+  }, [msg.sentenceBindings, msg.chitchat])
 
   const onCopy = async () => {
     try {
@@ -299,7 +347,7 @@ export function ChatMessage({
                 >
                   {msg.streaming
                     ? msg.content + STREAMING_CURSOR
-                    : msg.content}
+                    : displayContent}
                 </ReactMarkdown>
               ) : msg.streaming ? (
                 <StreamingPlaceholder />
@@ -375,13 +423,14 @@ export function ChatMessage({
       )}
       {/* v0.6.0 View-source modal. Lives at the message scope so two
           messages can each manage their own without state collision.
-          Highlight target is the bound paragraph (not the full chunk),
-          rendered as a vertical-bar accent via .paragraphRef. */}
+          v0.6.1: the inline popover already showed the user the
+          paragraph excerpt. Once they open the full PDF page, an
+          extra highlight overlay reads as redundant + cluttered, so
+          we drop it — the viewer just navigates to the right page. */}
       {viewingSource && (
         <PdfChunkViewer
           filename={viewingSource.filename}
           initialPage={viewingSource.page ?? 1}
-          chunkText={viewingSource.paragraph}
           onClose={() => setViewingSource(null)}
         />
       )}
