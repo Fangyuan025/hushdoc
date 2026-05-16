@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -133,6 +133,88 @@ def health() -> HealthResponse:
         vector_count=count,
         indexed_files=files,
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.6.2: resource-panel feed.
+#
+# The frontend polls /api/resource on a slow (4s) cadence when idle
+# and a faster (1s) one while generation is active. Returned numbers
+# back a small instrument readout in the header — char/s (computed
+# client-side), GPU VRAM / utilisation, and total backend RSS.
+#
+# Every field is best-effort. psutil / pynvml are imported lazily so
+# their absence on a CPU-only / no-psutil install only breaks
+# /resource, never the chain. The endpoint also never raises -- a
+# polling URL that crashes the backend would defeat the point.
+# ---------------------------------------------------------------------------
+def _proc_rss_bytes(pid: int) -> int:
+    try:
+        import psutil  # local import so a missing psutil only breaks /resource
+        return psutil.Process(pid).memory_info().rss
+    except Exception:
+        return 0
+
+
+def _gpu_snapshot() -> Optional[dict]:
+    """Return ``{name, vram_used, vram_total, util}`` for GPU 0, or
+    ``None`` if no NVIDIA GPU is reachable. Cheap and safe to call
+    every couple of seconds."""
+    try:
+        import pynvml  # local import
+        pynvml.nvmlInit()
+        try:
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            name = pynvml.nvmlDeviceGetName(handle)
+            if isinstance(name, bytes):
+                name = name.decode("utf-8", errors="replace")
+            return {
+                "name": str(name),
+                "vram_used": int(mem.used),
+                "vram_total": int(mem.total),
+                "util": int(util.gpu),
+            }
+        finally:
+            try:
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
+    except Exception:
+        return None
+
+
+@app.get("/api/resource")
+def resource_snapshot() -> dict:
+    """Lightweight system + chain snapshot for the corner resource
+    panel. Returns 0 / None for fields we can't measure."""
+    import os
+    backend_pid = os.getpid()
+    backend_rss = _proc_rss_bytes(backend_pid)
+    llama_rss = 0
+    llama_pid: Optional[int] = None
+    try:
+        # Peek the singleton without forcing a start (a polling
+        # endpoint must not spin llama-server on first call).
+        from llama_server import _shared_server as _ssvr  # type: ignore
+        server = _ssvr
+        if server is not None and getattr(server, "process", None) is not None:
+            proc = server.process
+            llama_pid = getattr(proc, "pid", None)
+            if llama_pid:
+                llama_rss = _proc_rss_bytes(llama_pid)
+    except Exception:
+        pass
+    gpu = _gpu_snapshot()
+    return {
+        "backend_pid": backend_pid,
+        "backend_rss": backend_rss,
+        "llama_pid": llama_pid,
+        "llama_rss": llama_rss,
+        "total_rss": backend_rss + llama_rss,
+        "gpu": gpu,
+    }
 
 
 # ---------------------------------------------------------------------------

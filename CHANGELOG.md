@@ -4,6 +4,51 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.6.2] — 2026-05-16
+
+Resource panel — one new feature, nothing else. A planned UI overhaul
+was scoped, reviewed, then pulled back: a separate experiment that
+will return when it's worth shipping on its own. v0.6.2 lands only
+the always-on instrument readout that came out of that experiment.
+
+### Added — resource panel
+A small live readout in the header (md+ viewports):
+```
+⚡ <ch/s>  ·  <GPU vram>  ·  <total RSS>
+```
+- **char/s** computed client-side from a rolling 3-second window of
+  SSE token chunks. ⚡ turns emerald during streaming; shows `—` when
+  idle. The label is "ch/s" not "tok/s" — we count characters off
+  the wire, not retokenised pieces.
+- **VRAM + RSS** polled from a new `GET /api/resource` endpoint.
+  `psutil` reads RSS of the uvicorn parent + the llama-server child;
+  `pynvml` reads the first NVIDIA GPU's name / util% / VRAM. Every
+  field is best-effort — missing libs / non-CUDA hosts get null and
+  the corresponding row just disappears. The endpoint never raises
+  (a polling URL crashing the backend would defeat the point).
+- Polling cadence flips between 4s (idle) and 1s (active streaming)
+  automatically.
+- Hover lifts a popover with three sections — Generation / GPU /
+  Memory — each row a uppercase mono label + mono-numeric value.
+  VRAM row carries an inline progress bar that turns amber > 75%
+  and rose > 90%.
+
+### Frontend plumbing
+- `web/src/lib/tokRate.ts`: tiny `window`-event publisher
+  (`hushdoc:tok`). useChat dispatches one event per SSE token chunk
+  with the chunk length; ResourcePanel subscribes. No prop drilling,
+  no context provider that re-renders the shell on every token.
+
+### Dependencies
+- `psutil>=5.9.0`, `pynvml>=11.5.0` added. Both pure-Python, no
+  native build. pynvml is optional at runtime — CPU-only installs
+  work fine, the GPU row simply doesn't render.
+
+### Compatibility
+- All v0.6.1 SSE shapes, persistence formats, and citation logic
+  unchanged. The resource panel is the only new API surface; removing
+  it doesn't affect anything else.
+
 ## [0.6.1] — 2026-05-15
 
 Polish patch on top of v0.6.0's inline-citation rework, from real-use

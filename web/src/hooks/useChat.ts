@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiClearChat } from "@/lib/api"
+import { emitTokens } from "@/lib/tokRate"
 import { conversationApi } from "@/hooks/useConversations"
 import type {
   AssistantVariant,
@@ -328,6 +329,10 @@ export function useChat({
         for await (const ev of parseSSE(resp, ac.signal)) {
           if (ev.event === "token") {
             const text = (ev.data as { text: string }).text
+            // v0.6.2: publish chunk length to the resource panel's
+            // rolling-rate tracker. Cheap: one CustomEvent per chunk,
+            // no React state crossings.
+            emitTokens(text.length)
             ttsBuf += text
             flushSentences(false)
             setMessages((m) =>
@@ -559,6 +564,7 @@ export function useChat({
         for await (const ev of parseSSE(resp, ac.signal)) {
           if (ev.event === "token") {
             const text = (ev.data as { text: string }).text
+            emitTokens(text.length)
             setMessages((ms) =>
               ms.map((msg) =>
                 msg.id === assistantId

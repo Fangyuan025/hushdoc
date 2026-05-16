@@ -44,5 +44,7 @@ hushdoc_config.json
 evaluate.py
 eval_dataset.json
 smoke_test.py
+smoke_v*.py
 test_api.py
+web/tests/
 data/attention.pdf

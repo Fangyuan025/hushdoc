@@ -17,6 +17,7 @@ import { Toaster } from "sonner"
 
 import { ChatPane, type ChatPaneHandle } from "@/components/ChatPane"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
+import { ResourcePanel } from "@/components/ResourcePanel"
 import { SettingsModal } from "@/components/Settings"
 import { Sidebar, SidebarContent } from "@/components/Sidebar"
 import { Button } from "@/components/ui/button"
@@ -282,6 +283,11 @@ function Shell() {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <HealthPill />
+          {/* v0.6.2: live throughput + memory readout, md+ only.
+              Self-hides gracefully when no GPU / no llama-server. */}
+          <div className="hidden md:block">
+            <ResourcePanel />
+          </div>
           <Button
             type="button"
             variant="ghost"
