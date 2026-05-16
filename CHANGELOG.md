@@ -4,6 +4,89 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.6.0] — 2026-05-15
+
+Sources you can read inline. v0.5.0 made citations chunk-level, with
+a chip row under the answer and a PDF viewer behind an "open" button.
+v0.6.0 reworks that to a NotebookLM-style inline experience: every
+fact-bearing sentence ends in a small numeric `[N]` chip; hovering
+lifts a popover with the exact paragraph from the cited chunk; one
+click on "View source →" opens the PDF page with the paragraph
+marked by a subtle vertical bar instead of a yellow wash. The whole
+loop happens without leaving the chat view.
+
+Two reliability shifts under the hood made this work:
+- **Strict source contract.** The Sources list is now exactly the
+  chunks the answer's `[N]` tags reference. No "model didn't cite
+  anything, fall back to dumping all top-k" behaviour — that was
+  the root cause of the "Sources panel full of irrelevant chunks"
+  complaint in v0.5.0.
+- **Hybrid citation resolution.** Small models (Qwen3-1.7B in
+  particular) often ignore citation rules on some prompts. We still
+  ask the model to cite with `[N]`; if it doesn't, the chain walks
+  the answer sentence-by-sentence, scores each factual sentence
+  against every kept chunk's paragraphs (token Jaccard + longest-
+  run overlap), and injects `[N]` for high-confidence matches. The
+  user-visible contract is preserved either way: every `[N]` in
+  the answer resolves to a real cited chunk.
+
+### Added — numeric `[N]` citations
+Every excerpt the model sees in the prompt is tagged `[1]`, `[2]`,
+... with a numeric id we stamp into chunk metadata. Citations from
+the model are validated against the valid id range; hallucinated
+`[N]` get stripped from the answer text before it ships. The
+pre-v0.5.x `[filename p.5]` page-level pattern is gone (kept only
+as a legacy fallback).
+
+### Added — sentence → chunk-paragraph binding
+New `chain_grounding.py` walks the answer text, segments into
+sentences (en + zh, abbreviation + decimal-number guards), and for
+each cited sentence picks the best matching paragraph inside the
+chunk. The popover then shows that paragraph (200-400 chars),
+not the whole chunk.
+
+### Added — adaptive top-k + MMR diversification
+The reranker now drops candidates whose score is on the wrong side
+of a cliff (default: < 30% of the top-vs-floor range, min_keep=3).
+MMR re-orders what remains to penalise near-duplicate chunks (token
+Jaccard, lambda=0.7). The candidate pool the model sees is tighter
+and more diverse. Env toggles: `HUSHDOC_ADAPTIVE_K`,
+`HUSHDOC_MMR_LAMBDA`. `retrieval_mode` now reads e.g.
+`hybrid+rerank+adaptive(3)+mmr` so users can see how aggressively
+the pipeline shaped the pool.
+
+### Added — inline `[N]` citation chips
+Each `[N]` in the answer renders as a small chip; hover lifts a
+popover showing the filename, page, and the bound paragraph
+verbatim. Click "View source →" to open the PDF viewer on that
+page with a subtle vertical-bar marker on the paragraph (the v0.5.0
+saturated yellow overlay is gone). A "weak match" badge appears in
+the popover when the binding score is below 0.1.
+
+### Added — ungrounded-sentence wavy underline
+A sentence that couldn't be bound to any chunk paragraph (low
+confidence: pure synthesis or potentially fabricated) gets a soft
+amber wavy underline. Hover shows "couldn't be matched to a
+specific source — double-check it". Short discourse markers
+("In summary,") are excluded so the marker stays meaningful.
+
+### Removed — chip row + Sources tab
+The redundant chip row under the answer and the Sources tab in the
+side drawer are gone (inline chips replace both). The drawer now
+contains only the Retrieval trace (debug / power-user surface),
+still reachable via the small `trace (N)` link at the right edge
+below each answer.
+
+### Migration notes
+- Conversations created before v0.6.0 load fine. Their assistant
+  messages have no `sentence_bindings`, so citation chips fall back
+  to "binding not found" hover state. Asking a follow-up generates
+  fresh bindings on the new turn.
+- API contract additions (backward-compatible): `done` SSE event
+  gains `sentence_bindings`. `MessageVariant.sentence_bindings`
+  persisted alongside variants.
+- No new dependencies. No frontend dependency bumps.
+
 ## [0.5.0] — 2026-05-14
 
 Find the right chunk, prove it visually. v0.5.0 is a retrieval-quality

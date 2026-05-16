@@ -58,14 +58,16 @@ embedding / ASR / TTS models. After that you can pull the ethernet.
 multi-file, replace-or-append. Per-file `Search scope` toggle.
 
 **Chat** — Streaming markdown answers with code, tables, and LaTeX.
-Inline `[file p.5]` citations link back to the exact retrieved chunk.
 Bilingual (中/EN) — answers in the language you asked in. Multi-thread
 sidebar with auto-titled conversations.
 
-**PDF citation viewer** — Click *open* on any source card → in-browser
-pdf.js renders the cited page and the chunk text lights up in **yellow
-highlighter** over the matched spans. Page nav, 50–200% zoom, Esc to
-close.
+**Inline `[N]` citations** — Every fact-bearing sentence ends in a
+small numeric chip. Hover lifts a popover showing the exact paragraph
+from the cited chunk; click *View source* to open the PDF page with
+the paragraph marked. The sources panel is exactly what the answer
+referenced — no irrelevant chunks padding the list. Ungrounded
+sentences (pure synthesis / low confidence) get a soft wavy
+underline so you know what to double-check.
 
 **Multi-variant regenerate** — Regenerate appends a new answer as a
 variant on the same bubble; flip between versions with a
