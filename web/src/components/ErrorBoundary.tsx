@@ -15,6 +15,8 @@
  */
 import { Component, type ErrorInfo, type ReactNode } from "react"
 
+import { detectLang, translate } from "@/lib/i18n"
+
 interface State {
   error: Error | null
 }
@@ -34,18 +36,20 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   render() {
     const { error } = this.state
     if (!error) return this.props.children
+    // ErrorBoundary is a class component so it can't use ``useT()``.
+    // Resolve the language directly from localStorage / navigator.
+    // The boundary's own state has no React rerender hook into our
+    // Provider, so the user's choice from Settings is the next best
+    // thing if it's already been persisted.
+    const lang = detectLang()
+    const t = (k: Parameters<typeof translate>[1]) => translate(lang, k)
     return (
       <div className="flex h-full min-h-0 items-center justify-center p-6">
         <div className="w-full max-w-lg space-y-4 rounded-lg border border-destructive/30 bg-destructive/5 p-5 text-sm">
           <div className="text-base font-semibold text-destructive">
-            Hushdoc hit a render error
+            {t("error.title")}
           </div>
-          <p className="text-muted-foreground">
-            Something in the UI threw before it could finish painting.
-            The error is logged in the browser console (F12 → Console).
-            You can usually recover by reloading the page; if it keeps
-            happening, paste the console output into a bug report.
-          </p>
+          <p className="text-muted-foreground">{t("error.body")}</p>
           <pre className="max-h-48 overflow-auto rounded border bg-card p-2 font-mono text-[11px] text-muted-foreground">
             {error.name}: {error.message}
           </pre>
@@ -55,14 +59,14 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
               onClick={() => this.setState({ error: null })}
               className="rounded border bg-card px-3 py-1.5 text-xs hover:bg-accent"
             >
-              Try to recover
+              {t("error.recover")}
             </button>
             <button
               type="button"
               onClick={() => window.location.reload()}
               className="rounded border bg-card px-3 py-1.5 text-xs hover:bg-accent"
             >
-              Reload page
+              {t("error.reload")}
             </button>
           </div>
         </div>

@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Cpu, MemoryStick, Zap } from "lucide-react"
 
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 import { onTokens } from "@/lib/tokRate"
 
@@ -85,6 +86,7 @@ function useCharRate() {
 }
 
 export function ResourcePanel() {
+  const t = useT()
   const { rate, active } = useCharRate()
   const refetchInterval = active ? 1000 : 4000
   const { data } = useQuery({
@@ -135,7 +137,7 @@ export function ResourcePanel() {
           "font-mono text-[10.5px] tabular-nums transition-colors",
           "text-muted-foreground/70 hover:text-foreground hover:bg-accent/40",
         )}
-        title="Click for details"
+        title={t("resource.click")}
       >
         <Zap
           className={cn(
@@ -152,7 +154,7 @@ export function ResourcePanel() {
             <span className="text-muted-foreground/30">·</span>
             <span
               className={cn(vramPct > 90 && "text-rose-500")}
-              title="GPU VRAM in use"
+              title={t("resource.gpuVram")}
             >
               {fmtBytes(data.gpu.vram_used)}
               <span className="ml-0.5 text-muted-foreground/50">vram</span>
@@ -162,7 +164,7 @@ export function ResourcePanel() {
         <span className="text-muted-foreground/30">·</span>
         <span
           className={cn(ramPct > 90 && "text-rose-500")}
-          title="Backend + llama-server RSS"
+          title={t("resource.totalRss")}
         >
           {fmtBytes(data?.total_rss ?? 0)}
           <span className="ml-0.5 text-muted-foreground/50">ram</span>
@@ -180,7 +182,7 @@ export function ResourcePanel() {
             "text-popover-foreground shadow-lg",
           )}
         >
-          <Section title="Generation">
+          <Section title={t("resource.generation")}>
             <Row
               icon={<Zap className="h-3 w-3" />}
               label="Throughput"
@@ -193,7 +195,7 @@ export function ResourcePanel() {
           </Section>
 
           {data.gpu && (
-            <Section title="GPU">
+            <Section title={t("resource.gpu")}>
               <Row label="Device" value={data.gpu.name} />
               <Row
                 icon={<Cpu className="h-3 w-3" />}
@@ -209,7 +211,7 @@ export function ResourcePanel() {
             </Section>
           )}
 
-          <Section title="Memory (RSS)">
+          <Section title={t("resource.memoryRss")}>
             <Row
               icon={<MemoryStick className="h-3 w-3" />}
               label="Backend"

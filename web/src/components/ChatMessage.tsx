@@ -15,6 +15,7 @@ import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
 
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 import type { ChatMessage as Msg, ParagraphBinding } from "@/types"
 
@@ -75,6 +76,8 @@ function renderWithCitations(
   bindings: Map<number, ParagraphBinding>,
   ungroundedSentences: string[],
   onOpenSource?: (b: ParagraphBinding) => void,
+  ungroundedTooltip: string =
+    "This sentence couldn't be matched to a specific source — double-check it",
 ): React.ReactNode {
   return React.Children.map(children, (child, childIdx) => {
     if (typeof child === "string") {
@@ -141,7 +144,7 @@ function renderWithCitations(
             <span
               key={`ung-${childIdx}-${mk.start}`}
               className="ungrounded"
-              title="This sentence couldn't be matched to a specific source — double-check it"
+              title={ungroundedTooltip}
             >
               {mk.text}
             </span>,
@@ -160,7 +163,7 @@ function renderWithCitations(
         return React.cloneElement(child, {
           ...props,
           children: renderWithCitations(
-            props.children, bindings, ungroundedSentences, onOpenSource,
+            props.children, bindings, ungroundedSentences, onOpenSource, ungroundedTooltip,
           ),
         } as React.HTMLAttributes<HTMLElement>)
       }
@@ -177,6 +180,7 @@ export function ChatMessage({
   onSwitchVariant,
   onOpenSource: onOpenSourceExternal,
 }: ChatMessageProps) {
+  const t = useT()
   const isUser = msg.role === "user"
   const [copied, setCopied] = useState(false)
   // v0.6.0: clicking "View source →" in a citation popover mounts the
@@ -320,27 +324,27 @@ export function ChatMessage({
                     // renderWithCitations.
                     p: ({ node, children, ...rest }) => (
                       <p {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
                       </p>
                     ),
                     li: ({ node, children, ...rest }) => (
                       <li {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
                       </li>
                     ),
                     td: ({ node, children, ...rest }) => (
                       <td {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
                       </td>
                     ),
                     th: ({ node, children, ...rest }) => (
                       <th {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
                       </th>
                     ),
                     blockquote: ({ node, children, ...rest }) => (
                       <blockquote {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource)}
+                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
                       </blockquote>
                     ),
                   }}
@@ -389,14 +393,14 @@ export function ChatMessage({
             )}
             {onRegenerate && (
               <ActionBtn
-                title="Regenerate answer"
+                title={t("msg.regenerate")}
                 onClick={onRegenerate}
               >
                 <RefreshCw className="h-3.5 w-3.5" />
               </ActionBtn>
             )}
             <ActionBtn
-              title={copied ? "Copied!" : "Copy answer"}
+              title={t(copied ? "msg.copied" : "msg.copy")}
               onClick={onCopy}
             >
               {copied ? (
@@ -407,7 +411,7 @@ export function ChatMessage({
             </ActionBtn>
             {msg.audioUrl && onReplay && (
               <ActionBtn
-                title="Replay audio"
+                title={t("msg.replayAudio")}
                 onClick={() => onReplay(msg.audioUrl!)}
               >
                 <Volume2 className="h-3.5 w-3.5" />
@@ -474,12 +478,13 @@ function VariantPager({
   active: number
   onSwitch: (idx: number) => void
 }) {
+  const t = useT()
   const atStart = active <= 0
   const atEnd = active >= count - 1
   return (
     <div className="mr-0.5 flex items-center gap-0 rounded-md text-xs">
       <ActionBtn
-        title="Previous answer"
+        title={t("msg.prevVariant")}
         disabled={atStart}
         onClick={() => !atStart && onSwitch(active - 1)}
       >
@@ -489,7 +494,7 @@ function VariantPager({
         {active + 1}/{count}
       </span>
       <ActionBtn
-        title="Next answer"
+        title={t("msg.nextVariant")}
         disabled={atEnd}
         onClick={() => !atEnd && onSwitch(active + 1)}
       >

@@ -71,6 +71,13 @@ const EN = {
   "msg.send": "Send",
   "msg.prevVariant": "Previous answer",
   "msg.nextVariant": "Next answer",
+  "msg.ungroundedTooltip":
+    "This sentence couldn't be matched to a specific source — double-check it",
+  "msg.micRecording": "Recording — click or pause for 1.5 s to stop",
+  "msg.micIdle": "Push-to-talk (voice mode is on)",
+  "msg.micTranscribing": "Transcribing…",
+  "msg.micStop": "Stop / cancel",
+  "msg.micSpeak": "Speak (English only)",
 
   // Settings
   "settings.title": "Settings",
@@ -83,6 +90,7 @@ const EN = {
   "settings.section.language": "Language",
   "settings.section.language.desc":
     "Interface language. Affects buttons, labels and tooltips. Documents and chat content are not translated.",
+  "settings.section.language.instant": "Takes effect immediately — no save needed.",
   "settings.section.model": "Model file",
   "settings.section.model.tag": ".gguf",
   "settings.section.model.desc":
@@ -96,6 +104,8 @@ const EN = {
   "settings.section.voice.desc":
     "Push-to-talk transcription (Whisper-base.en) and read-aloud replies (Kokoro-82M). Adds ~230 MB to disk once downloaded. Toggling this off hides the voice UI but doesn't delete the cached models.",
   "settings.voice.toggle": "Enable voice mode",
+  "sidebar.voiceHint":
+    "🌐 English only — Whisper-base.en in, Kokoro-82M out. Mic appears beside the chat input; auto-stops after 1.5 s of silence.",
   "settings.voice.subReady": "ready",
   "settings.voice.subNotLoaded": "not loaded",
   "settings.voice.subStatusUnknown": "status unknown",
@@ -124,6 +134,54 @@ const EN = {
   "library.selectNone": "Select none",
   "library.clearAll": "Clear entire library…",
   "library.cancelTooltip": "Cancel — finish the current file, then stop",
+  "library.addFiles": "Add files…",
+  "library.addFolder": "Add folder…",
+  "library.addFilesSub": "PDF · DOCX · img · md",
+  "library.addFolderSub": "recursive",
+  "library.pasteTextSub": "md / plain",
+  "library.pasteModalTitle": "Paste text into library",
+  "library.pasteFilenamePlaceholder":
+    "Filename (optional — derived from the first line)",
+  "library.pasteContentPlaceholder":
+    "Paste any text or markdown. It will be chunked and indexed locally; nothing is uploaded.",
+  "library.fileInScope": "In scope — uncheck to exclude",
+  "library.fileOutOfScope": "Include in next query",
+  "library.removeDocument": "Remove this document",
+  "library.deleteRowConfirm": "Confirm delete",
+  "library.deleteRowCancel": "Cancel",
+
+  // Sources / retrieval trace
+  "sources.title": "Retrieval trace",
+  "sources.empty":
+    "No retrieval trace for this turn (the assistant either short-circuited the chitchat path, or had no fresh retrieval).",
+  "sources.openTrace": "See the full retrieval trace",
+  "sources.carriedOver":
+    "Carried over from a previous turn in this conversation",
+
+  // PDF viewer
+  "pdf.prevPage": "Previous page (←)",
+  "pdf.nextPage": "Next page (→)",
+  "pdf.zoomOut": "Zoom out",
+  "pdf.zoomIn": "Zoom in",
+  "pdf.close": "Close (Esc)",
+
+  // Resource panel
+  "resource.click": "Click for details",
+  "resource.gpuVram": "GPU VRAM in use",
+  "resource.totalRss": "Backend + llama-server RSS",
+  "resource.generation": "Generation",
+  "resource.gpu": "GPU",
+  "resource.memoryRss": "Memory (RSS)",
+
+  // Chat extras
+  "chat.jumpToLatest": "Jump to latest",
+
+  // Error boundary
+  "error.title": "Hushdoc hit a render error",
+  "error.body":
+    "Something in the UI threw before it could finish painting. The error is logged in the browser console (F12 → Console). You can usually recover by reloading the page; if it keeps happening, please file an issue.",
+  "error.recover": "Try to recover",
+  "error.reload": "Reload page",
 
   // Common
   "common.cancel": "Cancel",
@@ -182,6 +240,13 @@ const ZH: Dict = {
   "msg.send": "发送",
   "msg.prevVariant": "上一个回答",
   "msg.nextVariant": "下一个回答",
+  "msg.ungroundedTooltip":
+    "这句话找不到具体出处 —— 请人工核对",
+  "msg.micRecording": "录音中 —— 点击或停顿 1.5 秒结束",
+  "msg.micIdle": "按住说话(语音模式已开)",
+  "msg.micTranscribing": "转写中…",
+  "msg.micStop": "停止 / 取消",
+  "msg.micSpeak": "说话(仅英文)",
 
   // Settings
   "settings.title": "设置",
@@ -194,6 +259,7 @@ const ZH: Dict = {
   "settings.section.language": "界面语言",
   "settings.section.language.desc":
     "界面显示语言,影响按钮、标签、提示文字。文档与对话内容不参与翻译。",
+  "settings.section.language.instant": "切换即时生效 —— 无需保存。",
   "settings.section.model": "模型文件",
   "settings.section.model.tag": ".gguf",
   "settings.section.model.desc":
@@ -207,6 +273,8 @@ const ZH: Dict = {
   "settings.section.voice.desc":
     "按住说话转写(Whisper-base.en)和朗读回答(Kokoro-82M)。下载后占用约 230 MB。关掉只是隐藏语音 UI,不会删除已缓存的模型。",
   "settings.voice.toggle": "启用语音模式",
+  "sidebar.voiceHint":
+    "🌐 仅英文 —— Whisper-base.en 输入,Kokoro-82M 输出。麦克风在输入框旁边,停顿 1.5 秒自动结束。",
   "settings.voice.subReady": "就绪",
   "settings.voice.subNotLoaded": "未加载",
   "settings.voice.subStatusUnknown": "状态未知",
@@ -236,6 +304,53 @@ const ZH: Dict = {
   "library.clearAll": "清空整个资料库…",
   // NOTE: 清 (clear), not 请 (please) — easy mis-input to watch for.
   "library.cancelTooltip": "取消 —— 完成当前文件后停止",
+  "library.addFiles": "添加文件…",
+  "library.addFolder": "添加文件夹…",
+  "library.addFilesSub": "PDF · DOCX · 图片 · md",
+  "library.addFolderSub": "递归",
+  "library.pasteTextSub": "md / 纯文本",
+  "library.pasteModalTitle": "粘贴文字到资料库",
+  "library.pasteFilenamePlaceholder":
+    "文件名(可选 —— 不填则从第一行自动取)",
+  "library.pasteContentPlaceholder":
+    "粘贴任何文本或 Markdown。本地切块 + 索引,不会上传。",
+  "library.fileInScope": "在检索范围 —— 取消勾选可排除",
+  "library.fileOutOfScope": "下次查询时纳入",
+  "library.removeDocument": "删除此文档",
+  "library.deleteRowConfirm": "确认删除",
+  "library.deleteRowCancel": "取消",
+
+  // Sources / retrieval trace
+  "sources.title": "检索轨迹",
+  "sources.empty":
+    "这一轮没有检索轨迹(要么走了 chitchat 短路,要么没有新的检索发生)。",
+  "sources.openTrace": "查看完整检索轨迹",
+  "sources.carriedOver": "由当前对话之前的轮次带过来",
+
+  // PDF viewer
+  "pdf.prevPage": "上一页(←)",
+  "pdf.nextPage": "下一页(→)",
+  "pdf.zoomOut": "缩小",
+  "pdf.zoomIn": "放大",
+  "pdf.close": "关闭(Esc)",
+
+  // Resource panel
+  "resource.click": "点击查看详情",
+  "resource.gpuVram": "GPU 显存占用",
+  "resource.totalRss": "后端 + llama-server 内存占用",
+  "resource.generation": "生成",
+  "resource.gpu": "GPU",
+  "resource.memoryRss": "内存(RSS)",
+
+  // Chat extras
+  "chat.jumpToLatest": "跳到最新",
+
+  // Error boundary
+  "error.title": "Hushdoc 渲染时出错",
+  "error.body":
+    "UI 渲染过程中抛了异常。错误已记到浏览器 console(F12 → Console)。一般刷新页面就能恢复;如果反复出现,请提 issue。",
+  "error.recover": "尝试恢复",
+  "error.reload": "刷新页面",
 
   // Common
   "common.cancel": "取消",

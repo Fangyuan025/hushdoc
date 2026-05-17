@@ -136,22 +136,28 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 <p className="text-[11px] text-muted-foreground leading-snug">
                   {t("settings.section.language.desc")}
                 </p>
-                <div className="inline-flex rounded-md border bg-card p-0.5">
-                  {(["en", "zh"] as const).map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setLang(opt as Lang)}
-                      className={cn(
-                        "rounded px-3 py-1 text-xs transition-colors",
-                        lang === opt
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {opt === "en" ? "English" : "中文"}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-md border bg-card p-0.5">
+                    {(["en", "zh"] as const).map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setLang(opt as Lang)}
+                        className={cn(
+                          "rounded px-3 py-1 text-xs transition-colors",
+                          lang === opt
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {opt === "en" ? "English" : "中文"}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="h-3 w-3" />
+                    {t("settings.section.language.instant")}
+                  </span>
                 </div>
               </section>
 

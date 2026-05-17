@@ -82,9 +82,7 @@ export function SidebarContent({
             </label>
             {voice.enabled && (
               <p className="mt-2 px-1 text-[11px] leading-snug text-muted-foreground">
-                🌐 English only — Whisper-base.en in, Kokoro-82M out. Mic
-                appears beside the chat input; auto-stops after 1.5 s of
-                silence.
+                {t("sidebar.voiceHint")}
               </p>
             )}
           </CollapsibleSection>

@@ -113,7 +113,7 @@ export function ConversationList({
                           e.stopPropagation()
                           setPendingDelete(c.id)
                         }}
-                        title="Delete"
+                        title={t("common.delete")}
                         className="mr-1 hidden h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
                       >
                         <Trash2 className="h-3 w-3" />

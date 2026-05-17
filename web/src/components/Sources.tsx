@@ -21,6 +21,7 @@
 import { useEffect, useState } from "react"
 import { Activity, Sparkles, X } from "lucide-react"
 
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 import type { RetrievalTraceEntry, SourceDoc } from "@/types"
 
@@ -38,6 +39,7 @@ export function Sources({ docs: _docs, standaloneQuery, trace, mode }: SourcesPr
   // the redundant chip row + Sources tab in the drawer are gone. This
   // component is now a thin "show retrieval trace" affordance for
   // debugging / power users, plus the standalone-query badge.
+  const t = useT()
   if (!trace || trace.length === 0) return null
   const [open, setOpen] = useState(false)
 
@@ -47,7 +49,7 @@ export function Sources({ docs: _docs, standaloneQuery, trace, mode }: SourcesPr
         type="button"
         onClick={() => setOpen(true)}
         className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground/60 hover:text-foreground"
-        title="See the full retrieval trace"
+        title={t("sources.openTrace")}
       >
         <Activity className="h-3 w-3" />
         trace ({trace.length})
@@ -81,6 +83,7 @@ function TraceDrawer({
   mode?: string
   onClose: () => void
 }) {
+  const t = useT()
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose()
@@ -99,7 +102,7 @@ function TraceDrawer({
       <aside className="flex h-full w-full max-w-md flex-col border-l bg-background shadow-xl">
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <Sparkles className="h-4 w-4 text-primary" />
-          <div className="text-sm font-medium">Retrieval trace</div>
+          <div className="text-sm font-medium">{t("sources.title")}</div>
           {mode && (
             <span className="ml-2 font-mono text-[10px] text-muted-foreground/70">
               {mode}
@@ -109,7 +112,7 @@ function TraceDrawer({
             type="button"
             onClick={onClose}
             className="ml-auto rounded p-1 text-muted-foreground hover:bg-accent"
-            title="Close (Esc)"
+            title={t("pdf.close")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -133,12 +136,10 @@ function TraceDrawer({
 // ---------------------------------------------------------------------------
 
 function TraceTab({ trace }: { trace: RetrievalTraceEntry[] }) {
+  const t = useT()
   if (trace.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
-        No retrieval trace for this turn (the assistant either short-
-        circuited to chitchat or the index was empty).
-      </p>
+      <p className="text-xs text-muted-foreground">{t("sources.empty")}</p>
     )
   }
   const dropped = trace.filter((t) => t.rank_after === null).length
@@ -220,6 +221,7 @@ function TraceRow({ entry }: { entry: RetrievalTraceEntry }) {
  *  the user spot at a glance which channel is pulling its weight on a
  *  given query (e.g. an exact-name query should be mostly 'bm25 / both'). */
 function SourceChannelChip({ channel }: { channel: string }) {
+  const t = useT()
   const lower = channel.toLowerCase()
   if (!lower || lower === "dense") {
     // Most common case for dense-only modes -- skip the chip to keep
@@ -251,7 +253,7 @@ function SourceChannelChip({ channel }: { channel: string }) {
     return (
       <span
         className="rounded bg-violet-500/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300"
-        title="Carried over from a previous turn in this conversation"
+        title={t("sources.carriedOver")}
       >
         memory
       </span>

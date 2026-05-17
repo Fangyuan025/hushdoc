@@ -1,6 +1,7 @@
 import { Loader2, Mic, Square } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 import type { VoiceState } from "@/hooks/useVoice"
 
@@ -25,6 +26,7 @@ export function MicButton({
   onCancel,
   disabled,
 }: MicButtonProps) {
+  const t = useT()
   const isRecording = state === "recording"
   const isProcessing = state === "processing"
 
@@ -47,13 +49,13 @@ export function MicButton({
         size="icon"
         disabled={disabled || isProcessing}
         onClick={isRecording ? onCancel : onStart}
-        title={
+        title={t(
           isProcessing
-            ? "Transcribing…"
+            ? "msg.micTranscribing"
             : isRecording
-              ? "Stop / cancel"
-              : "Speak (English only)"
-        }
+              ? "msg.micStop"
+              : "msg.micSpeak",
+        )}
         className={cn(
           "relative",
           isRecording && "bg-destructive text-destructive-foreground",

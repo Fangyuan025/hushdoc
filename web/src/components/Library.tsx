@@ -312,11 +312,12 @@ function AddMenu({
   onPasteText: () => void
   onClose: () => void
 }) {
+  const t = useT()
   // Click-outside dismissal.
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      const t = e.target as HTMLElement
-      if (!t.closest('[data-add-menu="root"]')) onClose()
+      const el = e.target as HTMLElement
+      if (!el.closest('[data-add-menu="root"]')) onClose()
     }
     window.addEventListener("mousedown", onDown)
     return () => window.removeEventListener("mousedown", onDown)
@@ -328,24 +329,24 @@ function AddMenu({
       className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border bg-popover shadow-md"
     >
       <MenuItem icon={<Upload className="h-3.5 w-3.5" />} onClick={onPickFiles}>
-        Add files…
+        {t("library.addFiles")}
         <span className="ml-auto text-[10px] text-muted-foreground">
-          PDF · DOCX · img · md
+          {t("library.addFilesSub")}
         </span>
       </MenuItem>
       <MenuItem icon={<FolderUp className="h-3.5 w-3.5" />} onClick={onPickFolder}>
-        Add folder…
+        {t("library.addFolder")}
         <span className="ml-auto text-[10px] text-muted-foreground">
-          recursive
+          {t("library.addFolderSub")}
         </span>
       </MenuItem>
       <MenuItem
         icon={<ClipboardPaste className="h-3.5 w-3.5" />}
         onClick={onPasteText}
       >
-        Paste text…
+        {t("library.pasteText")}
         <span className="ml-auto text-[10px] text-muted-foreground">
-          md / plain
+          {t("library.pasteTextSub")}
         </span>
       </MenuItem>
     </div>
@@ -423,6 +424,7 @@ function FileRow({
   onDelete: () => void
   deleting: boolean
 }) {
+  const t = useT()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const Icon = iconForFilename(file.filename)
   return (
@@ -437,7 +439,7 @@ function FileRow({
         checked={checked}
         onChange={onToggle}
         className="mt-1 h-3.5 w-3.5 shrink-0 accent-primary"
-        title={checked ? "In scope — uncheck to exclude" : "Include in next query"}
+        title={t(checked ? "library.fileInScope" : "library.fileOutOfScope")}
       />
       <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
@@ -467,7 +469,7 @@ function FileRow({
             }}
             disabled={deleting}
             className="rounded p-0.5 text-destructive hover:bg-destructive/10"
-            title="Confirm delete"
+            title={t("library.deleteRowConfirm")}
           >
             {deleting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -479,7 +481,7 @@ function FileRow({
             type="button"
             onClick={() => setConfirmDelete(false)}
             className="rounded p-0.5 text-muted-foreground hover:bg-accent"
-            title="Cancel"
+            title={t("library.deleteRowCancel")}
           >
             <XCircle className="h-3.5 w-3.5" />
           </button>
@@ -489,7 +491,7 @@ function FileRow({
           type="button"
           onClick={() => setConfirmDelete(true)}
           className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-          title="Remove this document"
+          title={t("library.removeDocument")}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
@@ -562,6 +564,7 @@ function PasteTextModal({
   onSubmit: (v: { text: string; filename: string }) => void
   pending: boolean
 }) {
+  const t = useT()
   const [text, setText] = useState("")
   const [filename, setFilename] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -585,12 +588,12 @@ function PasteTextModal({
     >
       <div className="flex h-[min(80vh,640px)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-background shadow-xl">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
-          <div className="text-sm font-medium">Paste text into library</div>
+          <div className="text-sm font-medium">{t("library.pasteModalTitle")}</div>
           <button
             type="button"
             onClick={onClose}
             className="rounded p-1 text-muted-foreground hover:bg-accent"
-            title="Close (Esc)"
+            title={t("pdf.close")}
           >
             <XCircle className="h-4 w-4" />
           </button>
@@ -600,7 +603,7 @@ function PasteTextModal({
             type="text"
             value={filename}
             onChange={(e) => setFilename(e.target.value)}
-            placeholder="Filename (optional — derived from the first line)"
+            placeholder={t("library.pasteFilenamePlaceholder")}
             className="w-full rounded-md border bg-card px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
@@ -608,16 +611,16 @@ function PasteTextModal({
           ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Paste any text or markdown. It will be chunked and indexed locally; nothing is uploaded."
+          placeholder={t("library.pasteContentPlaceholder")}
           className="min-h-0 flex-1 resize-none border-0 bg-transparent p-3 text-sm outline-none placeholder:text-muted-foreground"
         />
         <div className="flex items-center justify-between border-t px-3 py-2.5">
           <div className="text-[10px] text-muted-foreground">
-            {text.length.toLocaleString()} characters
+            {text.length.toLocaleString()}
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="ghost" onClick={onClose}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               size="sm"
@@ -628,7 +631,7 @@ function PasteTextModal({
               }}
             >
               {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Add to library
+              {t("library.addToLibrary")}
             </Button>
           </div>
         </div>

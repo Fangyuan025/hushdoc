@@ -54,6 +54,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
     scope,
     voice,
   }, ref) {
+    const t = useT()
     // After each completed assistant turn, cache the FULL synthesised
     // audio on the message so the 🔊 replay button works. This is a
     // background fetch — the streaming-TTS pipeline already played the
@@ -224,7 +225,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
               onClick={jumpToBottom}
             >
               <ArrowDown className="h-3 w-3" />
-              Jump to latest
+              {t("chat.jumpToLatest")}
             </Button>
           </div>
         )}
@@ -243,7 +244,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
                 variant="ghost"
                 className="h-6 w-6"
                 onClick={voice.togglePause}
-                title="Pause / resume"
+                title={t("msg.pauseResume")}
               >
                 <Pause className="h-3 w-3" />
               </Button>
@@ -253,7 +254,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
                 variant="ghost"
                 className="h-6 w-6"
                 onClick={voice.stopPlayback}
-                title="Stop"
+                title={t("msg.stop")}
               >
                 <X className="h-3 w-3" />
               </Button>

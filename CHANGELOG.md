@@ -4,6 +4,63 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.1] — 2026-05-17
+
+Polish patch on the v0.7.0 bilingual rollout, plus a real backend
+fix that was blocking new chats on some installs.
+
+### Fixed
+- **ChromaDB `RustBindingsAPI` AttributeError on backend boot.** A
+  stale chromadb 1.5.8 install left the Rust bindings layer in a
+  state where ``self.bindings`` was never assigned, so every call
+  through ``PersistentClient`` crashed with
+  ``AttributeError: 'RustBindingsAPI' object has no attribute 'bindings'``.
+  Force-reinstalled to 1.5.9; ``vector_store`` opens cleanly again.
+  ``pip install -r requirements.txt`` picks up the fix.
+- **Settings → Language toggle is no longer confusing.** Switching
+  language is local (no backend save needed), so the ``Save changes``
+  button stays disabled — but v0.7.0 didn't explain that, so users
+  thought the toggle was broken. Added a small green ``Takes effect
+  immediately — no save needed`` / ``切换即时生效 —— 无需保存`` hint next
+  to the toggle.
+
+### Added — i18n coverage extended
+v0.7.0 explicitly deferred several edge-case strings. This patch
+closes most of those:
+- **Chat message tooltips**: Copy / Copied / Regenerate / Replay audio
+  / Previous answer / Next answer / Stop / Send / pause-resume /
+  Pause TTS / Stop TTS / Jump to latest.
+- **Mic button**: Transcribing… / Stop / cancel / Speak.
+- **Ungrounded-sentence tooltip** (the wavy-amber hover).
+- **Library**: Add files… / Add folder… / Paste text…, all subtitles
+  (PDF · DOCX · img · md / recursive / md · plain), Paste-text modal
+  (title, filename placeholder, content placeholder, char count,
+  Cancel / Add to library buttons), FileRow tooltips (In scope / Out
+  of scope / Remove document / Confirm delete / Cancel).
+- **Sources / retrieval-trace drawer**: title, empty-state message,
+  trace-open tooltip, ``Carried over from a previous turn``
+  channel-chip tooltip.
+- **PDF viewer**: Prev/Next page, Zoom in/out, Close tooltips.
+- **Resource panel**: ``Click for details``, ``GPU VRAM in use``,
+  ``Backend + llama-server RSS`` tooltips; Generation / GPU /
+  Memory (RSS) section headers in the expanded popover.
+- **Sidebar voice mode hint** (the helper paragraph that appears
+  when voice mode is on).
+- **ErrorBoundary**: title, body, Try to recover, Reload page
+  (class component — pulls translation via the non-hook
+  ``translate()`` helper).
+- **Conversation list**: Delete button tooltip.
+
+### Still in English (deliberate)
+- Per-file metadata in Library rows (``42 chunks``, file sizes,
+  added-at timestamps) — these are numbers + filenames that don't
+  translate.
+- Retrieval trace per-row internals (rank numbers, source channel
+  chips ``dense / bm25 / both``) — debug surface, lower priority.
+- Toast notifications emitted from outside React. They use the
+  language at boot time, not the live setting — a follow-on patch
+  if anyone hits it.
+
 ## [0.7.0] — 2026-05-17
 
 **Bilingual UI (中文 / English).** The interface now ships in both

@@ -33,6 +33,7 @@ import type {
 
 import { Button } from "@/components/ui/button"
 import { highlightChunkInTextLayer } from "@/lib/pdf-highlight"
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 
 // Configure the worker once. The check guards against re-assignment
@@ -66,6 +67,7 @@ export function PdfChunkViewer({
   chunkText,
   onClose,
 }: PdfChunkViewerProps) {
+  const t = useT()
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
   const [pageNum, setPageNum] = useState<number>(initialPage || 1)
   const [zoomIdx, setZoomIdx] = useState<number>(2) // 1.0
@@ -339,7 +341,7 @@ export function PdfChunkViewer({
             size="icon-sm"
             onClick={onPrev}
             disabled={!doc || pageNum <= 1}
-            title="Previous page (←)"
+            title={t("pdf.prevPage")}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -366,7 +368,7 @@ export function PdfChunkViewer({
             size="icon-sm"
             onClick={onNext}
             disabled={!doc || pageNum >= numPages}
-            title="Next page (→)"
+            title={t("pdf.nextPage")}
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -377,7 +379,7 @@ export function PdfChunkViewer({
             size="icon-sm"
             onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}
             disabled={zoomIdx <= 0}
-            title="Zoom out"
+            title={t("pdf.zoomOut")}
           >
             <Minus className="h-4 w-4" />
           </Button>
@@ -392,7 +394,7 @@ export function PdfChunkViewer({
               setZoomIdx((i) => Math.min(ZOOM_STOPS.length - 1, i + 1))
             }
             disabled={zoomIdx >= ZOOM_STOPS.length - 1}
-            title="Zoom in"
+            title={t("pdf.zoomIn")}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -402,7 +404,7 @@ export function PdfChunkViewer({
             variant="ghost"
             size="icon-sm"
             onClick={onClose}
-            title="Close (Esc)"
+            title={t("pdf.close")}
           >
             <X className="h-4 w-4" />
           </Button>
