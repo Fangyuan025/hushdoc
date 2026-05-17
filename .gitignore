@@ -43,11 +43,12 @@ hushdoc_config.json
 # the public UX, and ``data/attention.pdf`` is a copyrighted academic
 # paper we can't redistribute).
 #
-# v0.6.5: ``evaluate.py`` + ``eval_dataset.json`` are NOW shipped --
-# they're advertised in README's Quality section so users need them
-# to reproduce the scores. ``ragas`` + ``datasets`` ship in
-# ``requirements-eval.txt`` (separate from the runtime requirements
-# so the chat path stays slim).
+# v0.6.5: ``evaluate.py`` IS shipped (it's advertised in README's
+# Quality section), but the labelled test set itself stays local --
+# the public eval scores in README come from the maintainer's
+# private set; users supply their own ``{question, ground_truth}``
+# JSON for their own domain.
+eval_dataset.json
 smoke_test.py
 smoke_v*.py
 test_api.py

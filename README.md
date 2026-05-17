@@ -168,24 +168,33 @@ bundled Qwen3-1.7B-Q4_K_M as both generator and judge:
 | **Answer Relevancy** | **0.974** | Answer actually addresses what was asked |
 | **Context Precision** | **0.906** | Fraction of top-k retrieved chunks that are on-topic for the question |
 
-Reproduce on your own venv + indexed corpus:
+Reproduce against your own corpus + question set:
 
 ```bash
 # 1. One-time: the eval-only extras (ragas, datasets, pyarrow).
 #    Kept out of the main requirements so the chat path stays slim.
 pip install -r requirements-eval.txt
 
-# 2. Score against the bundled 3-question Transformer-paper set.
-#    Requires the paper indexed; see `data/attention.pdf` placeholder.
+# 2. Score against your own labelled test set. The file is a JSON
+#    list of {question, ground_truth} objects; index the relevant
+#    documents into Hushdoc first, then point evaluate.py at it.
 python evaluate.py \
-  --test-set eval_dataset.json \
+  --test-set my_questions.json \
   --include-context-precision \
   --include-faithfulness
 ```
 
+Minimal `my_questions.json`:
+
+```json
+[
+  {"question": "What is X?", "ground_truth": "X is ..."},
+  {"question": "How does Y work?", "ground_truth": "Y works by ..."}
+]
+```
+
 Results land under `eval_results/` as paired JSON + CSV (per-question
-breakdown in the CSV). Swap `--test-set` for your own labelled JSON
-of `{question, ground_truth}` to score on your domain.
+breakdown in the CSV).
 
 ---
 

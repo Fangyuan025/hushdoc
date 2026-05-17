@@ -156,23 +156,32 @@ Kokoro-82M。
 | **Answer Relevancy** | **0.974** | 答案确实在回答被问的事 |
 | **Context Precision** | **0.906** | top-k 检索结果里真正与问题相关的占比 |
 
-在你自己的 venv + 已索引语料上复现：
+在你自己的语料 + 你自己的题目集上复现：
 
 ```bash
 # 1. 一次性装评测专用依赖（ragas / datasets / pyarrow），
 #    跟主 requirements 分开，聊天用户不背包袱。
 pip install -r requirements-eval.txt
 
-# 2. 跑自带的 3 题 Transformer 论文 set（需要先把论文索引进去）。
+# 2. 跑你自己的题目集 —— 一份 JSON 数组，每项是
+#    {question, ground_truth}。先把相关文档索引进 Hushdoc，
+#    然后让 evaluate.py 指过去。
 python evaluate.py \
-  --test-set eval_dataset.json \
+  --test-set my_questions.json \
   --include-context-precision \
   --include-faithfulness
 ```
 
+最简 `my_questions.json` 示例：
+
+```json
+[
+  {"question": "什么是 X？", "ground_truth": "X 是……"},
+  {"question": "Y 怎么工作？", "ground_truth": "Y 通过……工作。"}
+]
+```
+
 结果落在 `eval_results/`，JSON + CSV 配对（CSV 是逐题明细）。
-把 `--test-set` 换成你自己的 `{question, ground_truth}` JSON 就能
-评测自己领域的题目。
 
 ---
 
