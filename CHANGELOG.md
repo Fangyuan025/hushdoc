@@ -4,6 +4,47 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.6.3] — 2026-05-17
+
+Three paper-cut fixes that surfaced while developing — no new features.
+
+### Fixed
+- **No more `FutureWarning: The pynvml package is deprecated`** on every
+  CUDA touch. Swapped `requirements.txt` from the legacy ``pynvml``
+  PyPI package to NVIDIA's official ``nvidia-ml-py`` binding. Same
+  module name (``import pynvml``), identical API — zero application
+  code change. Warning was harmless but spammed dev mode's console.
+- **`npm run build` (production frontend bundle) now succeeds.**
+  ``src/hooks/useChat.ts``'s ``projectServerMessage`` had an inline
+  parameter type that didn't match the wider ``ServerConversationMessage``
+  shape exported by ``useConversations.ts`` — specifically
+  ``ServerVariant.retrieval_trace`` is typed ``unknown[]`` at the
+  server seam while the consumer wants ``RetrievalTraceEntry[]``.
+  Switched the parameter to ``ServerConversationMessage`` and cast at
+  the projection (where we know the runtime shape). Dev mode (Vite +
+  ``tsc --noEmit``) was unaffected and stays green; this just unblocks
+  the production build path.
+- **Terminal stops drowning in background-poll lines.** Three
+  endpoints fire on a timer from the frontend and used to dominate
+  uvicorn's access log: ``/api/heartbeat`` (every 10 s, browser-
+  alive watchdog), ``/api/health`` (every 5 s, HealthPill in the
+  header) and ``/api/resource`` (every 1 s active / 4 s idle,
+  ResourcePanel RAM + VRAM readout). A small ``logging.Filter`` on
+  ``uvicorn.access`` drops any record mentioning one of those
+  paths. All other request lines — chat, upload, document,
+  config, voice, etc. — still print as before, so debug scroll-
+  back is usable again.
+
+### Migration
+On the developer venv:
+
+```
+pip uninstall pynvml -y
+pip install nvidia-ml-py
+```
+
+A fresh ``pip install -r requirements.txt`` does the right thing.
+
 ## [0.6.2] — 2026-05-16
 
 Resource panel — one new feature, nothing else. A planned UI overhaul

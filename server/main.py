@@ -70,6 +70,35 @@ logging.basicConfig(
 logger = logging.getLogger("server.main")
 
 
+# v0.6.3: hide background-polling endpoints from uvicorn's access log
+# so they stop drowning the terminal in lines that all say the same
+# thing once a second. Three offenders:
+#   - ``/api/heartbeat`` — frontend pings every 10 s (browser-alive
+#     watchdog), plus a ``?closing=1`` pagehide beacon
+#   - ``/api/health`` — HealthPill in the header re-queries every 5 s
+#     (status indicator)
+#   - ``/api/resource`` — ResourcePanel polls every 1 s active /
+#     4 s idle (live RAM + VRAM readout)
+# All three are noise by design; real request lines (chat, upload,
+# config, document, voice, setup, cleanup, shutdown) still print.
+_NOISY_PATHS = ("/api/heartbeat", "/api/health", "/api/resource")
+
+
+class _AccessNoiseFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
+        # uvicorn.access formats the request line into the rendered
+        # message (e.g. ``'POST /api/heartbeat HTTP/1.1'``).
+        # ``getMessage()`` is the safest cross-version probe.
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return not any(p in msg for p in _NOISY_PATHS)
+
+
+logging.getLogger("uvicorn.access").addFilter(_AccessNoiseFilter())
+
+
 # Repo-root VERSION file is the single source of truth for the build's
 # user-visible version string. Read once at import; missing-or-broken file
 # falls back to "dev" so a git-clone running from source isn't blocked.

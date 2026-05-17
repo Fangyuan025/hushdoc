@@ -42,6 +42,13 @@ soundfile>=0.12.0            # WAV decode (Whisper input) + encode (Kokoro outpu
 pydantic>=2.7.0
 requests>=2.31.0             # used by llama_server.py for /health probe
 # v0.6.2: resource panel reads process RSS via psutil + optional GPU
-# stats via pynvml. Both are pure-Python wrappers, no native build.
+# stats via NVML. Both are pure-Python wrappers, no native build.
+#
+# v0.6.3: switched off the legacy ``pynvml`` PyPI package onto
+# ``nvidia-ml-py`` — the official NVIDIA-maintained binding with the
+# same module name (``import pynvml``) and identical API. Why: torch
+# 2.6+'s ``torch/cuda/__init__.py`` probes for the legacy package at
+# import time and prints a FutureWarning on every CUDA touch.
+# ``nvidia-ml-py`` silences it without forcing any code change.
 psutil>=5.9.0
-pynvml>=11.5.0               # optional: only used when an NVIDIA GPU is present
+nvidia-ml-py>=12.0.0         # optional: only used when an NVIDIA GPU is present

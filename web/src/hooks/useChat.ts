@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiClearChat } from "@/lib/api"
 import { emitTokens } from "@/lib/tokRate"
-import { conversationApi } from "@/hooks/useConversations"
+import {
+  conversationApi,
+  type ConversationMessage as ServerConversationMessage,
+} from "@/hooks/useConversations"
 import type {
   AssistantVariant,
   ChatMessage,
@@ -18,20 +21,7 @@ import type {
 function projectServerMessage(
   conversationId: string,
   index: number,
-  m: {
-    role: string
-    content: string
-    variants?: Array<{
-      content: string
-      sources?: SourceDoc[]
-      retrieval_trace?: RetrievalTraceEntry[]
-      retrieval_mode?: string
-      standalone_question?: string
-      chitchat?: boolean
-      sentence_bindings?: SentenceBinding[]
-    }>
-    active_variant?: number
-  },
+  m: ServerConversationMessage,
 ): ChatMessage {
   const role = m.role === "assistant" ? "assistant" : "user"
   const base: ChatMessage = {
@@ -43,14 +33,20 @@ function projectServerMessage(
   if (role !== "assistant" || !m.variants || m.variants.length === 0) {
     return base
   }
+  // ``ServerVariant.retrieval_trace`` is typed ``unknown[]`` at the
+  // server seam (the schema returns it as a list of plain dicts).
+  // The runtime shape DOES match RetrievalTraceEntry / SentenceBinding
+  // / SourceDoc -- we cast at this projection so consumers keep their
+  // precise types without the server interface having to know about
+  // the frontend's enriched shapes.
   const variants: AssistantVariant[] = m.variants.map((v) => ({
     content: v.content,
-    sources: v.sources,
+    sources: v.sources as SourceDoc[] | undefined,
     standaloneQuery: v.standalone_question,
-    retrievalTrace: v.retrieval_trace,
+    retrievalTrace: v.retrieval_trace as RetrievalTraceEntry[] | undefined,
     retrievalMode: v.retrieval_mode,
     chitchat: v.chitchat,
-    sentenceBindings: v.sentence_bindings,
+    sentenceBindings: v.sentence_bindings as SentenceBinding[] | undefined,
   }))
   const activeIdx = Math.min(
     Math.max(0, m.active_variant ?? 0),
