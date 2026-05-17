@@ -70,33 +70,59 @@ logging.basicConfig(
 logger = logging.getLogger("server.main")
 
 
-# v0.6.3: hide background-polling endpoints from uvicorn's access log
-# so they stop drowning the terminal in lines that all say the same
-# thing once a second. Three offenders:
-#   - ``/api/heartbeat`` — frontend pings every 10 s (browser-alive
-#     watchdog), plus a ``?closing=1`` pagehide beacon
-#   - ``/api/health`` — HealthPill in the header re-queries every 5 s
-#     (status indicator)
-#   - ``/api/resource`` — ResourcePanel polls every 1 s active /
-#     4 s idle (live RAM + VRAM readout)
-# All three are noise by design; real request lines (chat, upload,
-# config, document, voice, setup, cleanup, shutdown) still print.
+# v0.6.3: quiet down the terminal so the only request lines that
+# actually print are the ones a maintainer cares about (errors).
+# Three layers of muting:
+#
+#   1. Successful access log lines (HTTP 2xx / 3xx) are dropped --
+#      every chat / upload / config / document call used to print one
+#      ``"GET /api/foo HTTP/1.1" 200 OK`` line and that crowded out
+#      real debug info. 4xx / 5xx still print so failures stand out.
+#   2. Background-poll endpoints (``/api/heartbeat``, ``/api/health``,
+#      ``/api/resource``) are dropped at every status code -- they
+#      fire on a 1-10 s timer and are noise even when they 500.
+#   3. The chatty HuggingFace / httpx startup probes used to dump
+#      20+ INFO lines while sentence-transformers checked its model
+#      cache. Lift their levels so only real WARNING+ messages
+#      surface.
+#
+# Result: a fresh boot prints ~6 lines of "I'm up", then nothing
+# until something actually breaks.
+import re as _re
+
 _NOISY_PATHS = ("/api/heartbeat", "/api/health", "/api/resource")
+_STATUS_RE = _re.compile(r'"\s*(\d{3})\b')
 
 
 class _AccessNoiseFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
-        # uvicorn.access formats the request line into the rendered
-        # message (e.g. ``'POST /api/heartbeat HTTP/1.1'``).
+        # uvicorn.access formats the full line into the rendered
+        # message (e.g. ``'127.0.0.1:54321 - "GET /api/foo HTTP/1.1" 200 OK'``).
         # ``getMessage()`` is the safest cross-version probe.
         try:
             msg = record.getMessage()
         except Exception:
             return True
-        return not any(p in msg for p in _NOISY_PATHS)
+        if any(p in msg for p in _NOISY_PATHS):
+            return False
+        # Successful response codes are noise; only let errors print.
+        m = _STATUS_RE.search(msg)
+        if m:
+            code = int(m.group(1))
+            if 200 <= code < 400:
+                return False
+        return True
 
 
 logging.getLogger("uvicorn.access").addFilter(_AccessNoiseFilter())
+
+# Sentence-transformers + transformers each speak to HuggingFace Hub
+# at first load. ``huggingface_hub.utils._http`` warns about
+# rate-limit headers on unauthenticated requests; ``httpx`` logs
+# every metadata HEAD. Both are pure noise for our (cache-hit)
+# scenario -- bump them up so only real failures surface.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 
 # Repo-root VERSION file is the single source of truth for the build's

@@ -4,6 +4,40 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.6.4] — 2026-05-17
+
+Continuation of v0.6.3's terminal-cleanup pass. After turning on the
+backend we noticed two more sources of noise; this version silences
+both and tightens the access-log policy.
+
+### Fixed
+- **`UserWarning: Parameters {'frequency_penalty', 'presence_penalty'}
+  should be specified explicitly` is gone.** ``langchain-openai`` 0.2+
+  prefers these as top-level ``ChatOpenAI(...)`` args instead of inside
+  ``model_kwargs={}``. Moved them; sampler behaviour is unchanged —
+  llama-server still receives both penalties as 0.0.
+- **Startup no longer dumps 20+ `httpx` + HF Hub lines.** Sentence-
+  transformers probes HuggingFace at first load to verify the local
+  cache is current; the resulting INFO-level HTTP trace and the
+  ``Warning: You are sending unauthenticated requests to the HF Hub``
+  line crowded out the real boot log. Bumped ``httpx`` logger to
+  ``WARNING`` and ``huggingface_hub`` to ``ERROR`` so only real
+  failures surface.
+
+### Changed
+- **Uvicorn's access log now only prints HTTP errors (4xx / 5xx).**
+  Every successful chat / upload / config / document call used to
+  print a green ``200 OK`` line; on a busy session this crowded out
+  the actual debug output a maintainer cares about. The
+  ``logging.Filter`` introduced in v0.6.3 now also drops any record
+  whose status code is in the 2xx / 3xx range — so a 404 / 500 still
+  jumps out, but the happy path is silent. Background-poll endpoints
+  (``/api/heartbeat`` / ``/api/health`` / ``/api/resource``) remain
+  fully muted at all status codes.
+
+Net effect: a fresh boot prints ~6 application-level INFO lines,
+then the terminal stays quiet until something actually breaks.
+
 ## [0.6.3] — 2026-05-17
 
 Three paper-cut fixes that surfaced while developing — no new features.

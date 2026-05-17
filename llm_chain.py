@@ -530,6 +530,13 @@ def load_local_llm(config: Optional[LLMConfig] = None) -> ChatOpenAI:
             cfg.n_gpu_layers,
         )
         # llama-server doesn't enforce auth; ChatOpenAI requires *some* key.
+        # v0.6.3: ``frequency_penalty`` / ``presence_penalty`` moved from
+        # ``model_kwargs`` to top-level args. langchain-openai 0.2+ warns
+        # at every chain build when these are tucked inside model_kwargs:
+        #   ``UserWarning: Parameters {'frequency_penalty', 'presence_penalty'}
+        #    should be specified explicitly. Instead they were passed in as
+        #    part of `model_kwargs` parameter.``
+        # Behaviour is identical -- llama-server still receives them.
         llm = ChatOpenAI(
             base_url=server_cfg.openai_base_url,
             api_key="not-needed",
@@ -540,11 +547,9 @@ def load_local_llm(config: Optional[LLMConfig] = None) -> ChatOpenAI:
             max_tokens=cfg.max_tokens,
             top_p=cfg.top_p,
             # repeat_penalty maps onto OpenAI's frequency_penalty loosely;
-            # llama-server passes through model_kwargs as sampler params.
-            model_kwargs={
-                "frequency_penalty": 0.0,
-                "presence_penalty": 0.0,
-            },
+            # llama-server treats both as sampler params.
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
             timeout=600,
             max_retries=2,
             **cfg.extra_kwargs,
