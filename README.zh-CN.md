@@ -147,8 +147,11 @@ Kokoro-82M。
 数字说话，不是凭感觉。Hushdoc 内置一套离线 [Ragas](https://github.com/explodinggradients/ragas)
 评测脚本，用同一份本地 llama.cpp 当 judge LLM，整套评测全程不出网。
 
-最近一次跑分（v0.6.4 pipeline，索引《Attention Is All You Need》，
-被测和 judge 都用自带的 Qwen3-1.7B-Q4_K_M）：
+**运行设置** —— v0.6.4 RAG pipeline · 索引语料为
+[《Attention Is All You Need》](https://arxiv.org/abs/1706.03762)
+原文（Docling 切完得 42 个 chunk） · 3 题标注集（涵盖数据集 /
+`d_model` / encoder-decoder 层数）· 被测模型 + Ragas judge 都用自带的
+**Qwen3-1.7B-Q4_K_M**（全程无外部 API 介入）：
 
 | 指标 | 得分 | 含义 |
 |---|---:|---|

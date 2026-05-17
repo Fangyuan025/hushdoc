@@ -159,8 +159,12 @@ harness that scores the full RAG pipeline against a labelled question
 set — using the same local llama.cpp as the judge LLM, so the whole
 evaluation is air-gapped.
 
-Latest run, v0.6.4 pipeline, *Attention Is All You Need* indexed,
-bundled Qwen3-1.7B-Q4_K_M as both generator and judge:
+**Run setup** — v0.6.4 RAG pipeline · indexed corpus is the original
+[*Attention Is All You Need*](https://arxiv.org/abs/1706.03762) paper
+(42 chunks after Docling ingest) · 3-question labelled set covering
+dataset / `d_model` / encoder-decoder depth · bundled
+**Qwen3-1.7B-Q4_K_M** serves as both the generator AND the Ragas judge
+LLM (no external API in the loop):
 
 | Metric | Score | What it measures |
 |---|---:|---|
