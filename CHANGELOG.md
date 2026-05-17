@@ -4,6 +4,59 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.0] — 2026-05-17
+
+**Bilingual UI (中文 / English).** The interface now ships in both
+languages, switchable live from a new **Language** section at the
+top of the Settings panel. Buttons, labels, tooltips, the
+onboarding empty-state, the chat input placeholder, and the
+footer all swap on click — no reload required.
+
+### Added
+- **Custom i18n layer** (`web/src/lib/i18n.ts` + `lang-context.tsx`)
+  — typed dictionary, `t("key", { vars })` helper, React Context
+  Provider with `useT()` hook. No new npm dep (~50-line glue beats
+  bundling 30 KB of `react-i18next` for our string count).
+- **Language detection on first boot**: explicit user choice in
+  `localStorage` wins, falling back to `navigator.language` (any
+  `zh*` locale → 中文; else English). The chosen value persists
+  per machine so re-opens skip the auto-detect.
+- **Settings → Language**: segmented `English / 中文` toggle at the
+  top of the Settings panel. Live re-render on click.
+
+### Ported (this pass)
+The high-traffic surfaces a user actually reads end-to-end:
+- **Header**: HealthPill states (Connecting / Backend offline /
+  `{n} chunks · ready` / `{n} chunks · warming up`), Settings
+  tooltip, light/dark toggle.
+- **Sidebar**: CHATS / LIBRARY / VOICE section labels, "New chat",
+  "No saved chats yet.", "Add to library", "Your library is empty…",
+  scope toolbar (`all N in scope` / `Select none`), `Clear entire
+  library…`, `Indexing…`.
+- **Chat empty state**: "What would you like to know?" + the
+  hint paragraph + all 4 example-prompt cards.
+- **Chat input**: placeholder + Send / Stop tooltips + footer
+  line ("Hushdoc runs entirely on your machine — nothing leaves it.")
+- **Settings modal**: every section header, description,
+  status-pip (file present / file missing), button labels (Save
+  changes / Close / Cancel), status line (All settings up to
+  date / Unsaved changes / Applying…).
+
+### Deliberately left in English (v0.7.x deferred)
+- Chat message tooltips inside individual assistant bubbles
+  (Copy / Regenerate / Replay audio / pager arrows).
+- Citation hover popover internals.
+- Library per-file row text (`42 chunks`, file sizes, timestamps)
+  — these are mostly numbers + filenames that don't translate.
+- Error toasts emitted from outside React (e.g. fetch failure
+  strings).
+- Onboarding wizard (it doesn't exist on v0.7.0 — left over note
+  from the abandoned desktop-app branch).
+
+Coverage is enough that a Chinese user can navigate the whole app
+without hitting English chrome; remaining strings will land in
+follow-on v0.7.x patches as they're noticed.
+
 ## [0.6.4] — 2026-05-17
 
 Continuation of v0.6.3's terminal-cleanup pass. After turning on the

@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { useDocuments } from "@/hooks/useDocuments"
 import type { useVoice } from "@/hooks/useVoice"
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 
 export interface SidebarProps {
@@ -25,6 +26,7 @@ export function SidebarContent({
   onScopeChange,
   voice,
 }: SidebarProps) {
+  const t = useT()
   const { list } = useDocuments()
   const chunkCount = list.data?.chunk_count ?? 0
   const fileCount = list.data?.files?.length ?? list.data?.filenames?.length ?? 0
@@ -37,7 +39,7 @@ export function SidebarContent({
           <CollapsibleSection
             id="chats"
             icon={<MessageSquare className="h-3.5 w-3.5" />}
-            title="Chats"
+            title={t("sidebar.chats")}
             defaultOpen
           >
             <ConversationList
@@ -51,7 +53,7 @@ export function SidebarContent({
           <CollapsibleSection
             id="library"
             icon={<BookOpen className="h-3.5 w-3.5" />}
-            title="Library"
+            title={t("sidebar.library")}
             badge={
               chunkCount > 0
                 ? `${fileCount} file${fileCount === 1 ? "" : "s"} · ${chunkCount} chunks`
@@ -68,11 +70,11 @@ export function SidebarContent({
           <CollapsibleSection
             id="voice"
             icon={<Mic className="h-3.5 w-3.5" />}
-            title="Voice"
+            title={t("sidebar.voice")}
             defaultOpen={false}
           >
             <label className="flex cursor-pointer items-center justify-between gap-2 rounded-md border bg-card px-2.5 py-2 text-xs">
-              <span>Voice mode</span>
+              <span>{t("settings.voice.toggle")}</span>
               <Switch
                 checked={voice.enabled}
                 onCheckedChange={(v) => voice.setEnabled(v)}

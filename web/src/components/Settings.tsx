@@ -30,6 +30,8 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { apiGetConfig, apiSaveConfig } from "@/lib/api"
+import type { Lang } from "@/lib/i18n"
+import { useLang, useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 
 interface SettingsModalProps {
@@ -37,6 +39,8 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
+  const t = useT()
+  const { lang, setLang } = useLang()
   const qc = useQueryClient()
   const { data: config, isLoading } = useQuery({
     queryKey: ["config"],
@@ -103,13 +107,13 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       <div className="flex max-h-[min(90vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-background shadow-xl">
         <div className="flex items-center gap-2 border-b px-4 py-2.5">
           <SettingsIcon className="h-4 w-4 text-muted-foreground" />
-          <div className="text-sm font-medium">Settings</div>
+          <div className="text-sm font-medium">{t("settings.title")}</div>
           <button
             type="button"
             onClick={onClose}
             disabled={save.isPending}
             className="ml-auto rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50"
-            title="Close (Esc)"
+            title={`${t("settings.close")} (Esc)`}
           >
             <X className="h-4 w-4" />
           </button>
@@ -119,25 +123,51 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           {isLoading || !config ? (
             <div className="p-6 text-sm text-muted-foreground">
               <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-              Loading current settings…
+              {t("settings.loading")}
             </div>
           ) : (
             <div className="space-y-6 p-5">
+              {/* Language (v0.7.0) -- bilingual UI toggle. Lives at the
+                  top so users coming in to flip language find it first. */}
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold">
+                  {t("settings.section.language")}
+                </h3>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  {t("settings.section.language.desc")}
+                </p>
+                <div className="inline-flex rounded-md border bg-card p-0.5">
+                  {(["en", "zh"] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setLang(opt as Lang)}
+                      className={cn(
+                        "rounded px-3 py-1 text-xs transition-colors",
+                        lang === opt
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {opt === "en" ? "English" : "中文"}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <hr className="border-border/50" />
+
               {/* Model path */}
               <section className="space-y-2">
                 <div className="flex items-baseline gap-2">
-                  <h3 className="text-sm font-semibold">Model file</h3>
+                  <h3 className="text-sm font-semibold">{t("settings.section.model")}</h3>
                   <span className="text-[11px] text-muted-foreground">
-                    .gguf
+                    {t("settings.section.model.tag")}
                   </span>
-                  <PathStatusPip ok={ggufOk} />
+                  <PathStatusPip ok={ggufOk} okLabel={t("settings.filePresent")} missLabel={t("settings.fileMissing")} />
                 </div>
                 <p className="text-[11px] text-muted-foreground leading-snug">
-                  Path to the GGUF the chain should load. Relative paths
-                  resolve from the repo root. Changing this stops the
-                  running <code className="rounded bg-muted px-1">llama-server.exe</code>{" "}
-                  and starts a fresh one against the new model — chat in
-                  progress will be interrupted.
+                  {t("settings.section.model.desc")}
                 </p>
                 <input
                   type="text"
@@ -151,8 +181,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 {modelPathDirty && (
                   <p className="text-[11px] text-amber-600 dark:text-amber-400">
                     <AlertTriangle className="mr-1 inline h-3 w-3" />
-                    Saving will reload the model. The first request after
-                    that takes 10–30 s while the new model loads.
+                    {t("settings.section.model.dirtyWarn")}
                   </p>
                 )}
               </section>
@@ -161,7 +190,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
               {/* Auto-cleanup */}
               <section className="space-y-2">
-                <h3 className="text-sm font-semibold">Auto-cleanup on exit</h3>
+                <h3 className="text-sm font-semibold">{t("settings.section.cleanup")}</h3>
                 <label className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-card/50 p-3 hover:bg-card">
                   <input
                     type="checkbox"
@@ -172,22 +201,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   />
                   <div className="min-w-0">
                     <div className="text-sm font-medium">
-                      Wipe local data automatically when I close the browser
+                      {t("settings.cleanup.toggle")}
                     </div>
                     <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                      With this on, the launcher skips its three "Delete X?"
-                      prompts on exit and just clears{" "}
-                      <code className="rounded bg-muted px-1">
-                        chat_history/
-                      </code>{" "}
-                      ,{" "}
-                      <code className="rounded bg-muted px-1">
-                        data/uploads/
-                      </code>{" "}
-                      , and{" "}
-                      <code className="rounded bg-muted px-1">chroma_db/</code>{" "}
-                      before the window closes. With it off (the default), you
-                      get the per-category prompt as before.
+                      {t("settings.cleanup.desc")}
                     </div>
                   </div>
                 </label>
@@ -199,10 +216,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         <div className="flex items-center justify-between border-t px-4 py-2.5">
           <div className="text-[11px] text-muted-foreground">
             {save.isPending
-              ? "Applying — don't close this window."
+              ? t("settings.saving")
               : anythingDirty
-                ? "Unsaved changes"
-                : "All settings up to date"}
+                ? t("settings.unsaved")
+                : t("settings.upToDate")}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -211,7 +228,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               onClick={onClose}
               disabled={save.isPending}
             >
-              Close
+              {t("settings.close")}
             </Button>
             <Button
               size="sm"
@@ -219,7 +236,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               onClick={() => save.mutate()}
             >
               {save.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Save changes
+              {t("settings.save")}
             </Button>
           </div>
         </div>
@@ -230,7 +247,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
 // ---------------------------------------------------------------------------
 
-function PathStatusPip({ ok }: { ok: boolean }) {
+function PathStatusPip({
+  ok,
+  okLabel,
+  missLabel,
+}: {
+  ok: boolean
+  okLabel: string
+  missLabel: string
+}) {
   return (
     <span
       className={cn(
@@ -243,12 +268,12 @@ function PathStatusPip({ ok }: { ok: boolean }) {
       {ok ? (
         <>
           <CheckCircle2 className="h-2.5 w-2.5" />
-          file present
+          {okLabel}
         </>
       ) : (
         <>
           <AlertTriangle className="h-2.5 w-2.5" />
-          file missing
+          {missLabel}
         </>
       )}
     </span>

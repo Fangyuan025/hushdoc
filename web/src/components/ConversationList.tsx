@@ -9,6 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useConversations } from "@/hooks/useConversations"
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 
 interface ConversationListProps {
@@ -24,6 +25,7 @@ export function ConversationList({
   onSelect,
   onCreate,
 }: ConversationListProps) {
+  const t = useT()
   const { list, remove } = useConversations()
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
@@ -38,14 +40,12 @@ export function ConversationList({
         onClick={onCreate}
       >
         <Plus className="h-3.5 w-3.5" />
-        New chat
+        {t("sidebar.newChat")}
       </Button>
 
       {items.length === 0 ? (
         <p className="px-1 py-1 text-[11px] text-muted-foreground">
-          {list.isLoading
-            ? "Loading conversations…"
-            : "No saved chats yet."}
+          {list.isLoading ? "…" : t("sidebar.noChatsYet")}
         </p>
       ) : (
         <TooltipProvider delayDuration={500}>
@@ -72,11 +72,11 @@ export function ConversationList({
                           )}
                         >
                           <MessageSquare className="h-3 w-3 shrink-0 opacity-70" />
-                          <span className="truncate">{c.title || "New chat"}</span>
+                          <span className="truncate">{c.title || t("sidebar.newChat")}</span>
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="max-w-xs">
-                        <div className="font-medium">{c.title || "New chat"}</div>
+                        <div className="font-medium">{c.title || t("sidebar.newChat")}</div>
                         <div className="mt-0.5 text-[10px] opacity-80">
                           {c.message_count} messages ·{" "}
                           {new Date(c.updated_at * 1000).toLocaleString()}

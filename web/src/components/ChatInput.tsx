@@ -5,6 +5,7 @@ import TextareaAutosize from "react-textarea-autosize"
 
 import { Button } from "@/components/ui/button"
 import { apiHealth } from "@/lib/api"
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 
 interface ChatInputProps {
@@ -23,13 +24,15 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     {
       disabled,
       streaming,
-      placeholder = "Ask anything about your documents…",
+      placeholder,
       onSend,
       onStop,
       leftSlot,
     },
     ref,
   ) {
+  const t = useT()
+  const ph = placeholder ?? t("chat.inputPlaceholder")
   const [value, setValue] = useState("")
 
   // Surface the app version under the input. Same query-key as the
@@ -64,7 +67,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKey}
-          placeholder={placeholder}
+          placeholder={ph}
           minRows={1}
           maxRows={8}
           disabled={disabled}
@@ -79,7 +82,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
             size="icon"
             variant="secondary"
             onClick={onStop}
-            title="Stop"
+            title={t("msg.stop")}
           >
             <Square className="h-4 w-4 fill-current" />
           </Button>
@@ -89,14 +92,14 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
             size="icon"
             onClick={submit}
             disabled={disabled || !value.trim()}
-            title="Send"
+            title={t("msg.send")}
           >
             <ArrowUp className="h-4 w-4" />
           </Button>
         )}
       </div>
       <div className="mx-auto mt-1.5 max-w-3xl text-center text-[10px] text-muted-foreground/70">
-        Hushdoc runs entirely on your machine — nothing leaves it.
+        {t("chat.footer")}
         {health?.version && (
           <span className="ml-2 opacity-60">v{health.version}</span>
         )}

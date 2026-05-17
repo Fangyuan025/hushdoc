@@ -26,6 +26,7 @@ import { useConversations } from "@/hooks/useConversations"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { useVoice } from "@/hooks/useVoice"
 import { apiHealth } from "@/lib/api"
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 
 const ACTIVE_CONV_KEY = "hushdoc-active-conv"
@@ -37,6 +38,7 @@ const qc = new QueryClient({
 })
 
 function HealthPill() {
+  const t = useT()
   const { data, isLoading, error } = useQuery({
     queryKey: ["health"],
     queryFn: apiHealth,
@@ -46,7 +48,7 @@ function HealthPill() {
   if (isLoading)
     return (
       <Pill icon={<Loader2 className="h-3.5 w-3.5 animate-spin" />}>
-        Connecting…
+        {t("header.connecting")}
       </Pill>
     )
   if (error)
@@ -55,16 +57,16 @@ function HealthPill() {
         icon={<AlertTriangle className="h-3.5 w-3.5" />}
         variant="destructive"
       >
-        Backend offline
+        {t("header.offline")}
       </Pill>
     )
+  const n = data?.vector_count ?? 0
   return (
     <Pill
       icon={<ShieldCheck className="h-3.5 w-3.5" />}
       variant={data?.chain_loaded ? "ready" : "loading"}
     >
-      {data?.vector_count ?? 0} chunks ·{" "}
-      {data?.chain_loaded ? "ready" : "warming up"}
+      {t(data?.chain_loaded ? "header.ready" : "header.warming", { n })}
     </Pill>
   )
 }
@@ -99,6 +101,7 @@ function Pill({
 }
 
 function Shell() {
+  const t = useT()
   const [dark, setDark] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -293,7 +296,7 @@ function Shell() {
             variant="ghost"
             size="icon-sm"
             onClick={() => setSettingsOpen(true)}
-            title="Settings"
+            title={t("header.settings")}
           >
             <SettingsIcon className="h-4 w-4" />
           </Button>
@@ -302,7 +305,7 @@ function Shell() {
             variant="ghost"
             size="icon-sm"
             onClick={() => setDark((d) => !d)}
-            title={dark ? "Switch to light" : "Switch to dark"}
+            title={t(dark ? "header.toggleLight" : "header.toggleDark")}
           >
             {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>

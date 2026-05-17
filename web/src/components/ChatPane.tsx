@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useChat } from "@/hooks/useChat"
 import { useStickyBottom } from "@/hooks/useStickyBottom"
 import type { useVoice } from "@/hooks/useVoice"
+import { useT } from "@/lib/lang-context"
 import type { ChatMessage as Msg } from "@/types"
 
 import { ChatInput } from "./ChatInput"
@@ -282,33 +283,25 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
   },
 )
 
-const SUGGESTED_PROMPTS: { title: string; subtitle: string; prompt: string }[] =
-  [
-    {
-      title: "Summarize my documents",
-      subtitle: "give me the key takeaways",
-      prompt: "Give me a concise summary of the documents I've uploaded.",
-    },
-    {
-      title: "Compare two papers",
-      subtitle: "highlight what's different",
-      prompt:
-        "Pick two of the indexed documents and compare their main arguments — where do they agree and disagree?",
-    },
-    {
-      title: "Find a specific fact",
-      subtitle: "with an inline citation",
-      prompt: "What does the document say about <topic>? Cite the page.",
-    },
-    {
-      title: "Explain it simply",
-      subtitle: "for a non-expert",
-      prompt:
-        "Explain the core idea of the most recent document I uploaded as if I'm a smart non-expert.",
-    },
-  ]
+// Suggested prompts are i18n'd by the EmptyState below; the prompt
+// the LLM actually receives is kept in English so retrieval works
+// the same regardless of UI language. (Bilingual chat itself is
+// already supported — the user can re-type in Chinese.)
+const SUGGESTED_PROMPT_BODIES = [
+  "Give me a concise summary of the documents I've uploaded.",
+  "Pick two of the indexed documents and compare their main arguments — where do they agree and disagree?",
+  "What does the document say about <topic>? Cite the page.",
+  "Explain the core idea of the most recent document I uploaded as if I'm a smart non-expert.",
+] as const
 
 function EmptyState({ onPickPrompt }: { onPickPrompt: (text: string) => void }) {
+  const t = useT()
+  const cards = [
+    { title: t("chat.examples.summarize.title"), sub: t("chat.examples.summarize.sub"), prompt: SUGGESTED_PROMPT_BODIES[0] },
+    { title: t("chat.examples.compare.title"),  sub: t("chat.examples.compare.sub"),  prompt: SUGGESTED_PROMPT_BODIES[1] },
+    { title: t("chat.examples.fact.title"),     sub: t("chat.examples.fact.sub"),     prompt: SUGGESTED_PROMPT_BODIES[2] },
+    { title: t("chat.examples.simple.title"),   sub: t("chat.examples.simple.sub"),   prompt: SUGGESTED_PROMPT_BODIES[3] },
+  ]
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 px-2 text-center">
       <div className="flex flex-col items-center gap-3">
@@ -316,15 +309,14 @@ function EmptyState({ onPickPrompt }: { onPickPrompt: (text: string) => void }) 
           <Sparkles className="h-6 w-6" />
         </div>
         <h2 className="text-2xl font-semibold tracking-tight">
-          What would you like to know?
+          {t("chat.emptyTitle")}
         </h2>
         <p className="max-w-md text-sm text-muted-foreground">
-          Upload a PDF, DOCX, or document photo from the sidebar, then ask
-          away. Everything runs on your machine — nothing leaves it.
+          {t("chat.emptyHint")}
         </p>
       </div>
       <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
-        {SUGGESTED_PROMPTS.map((p) => (
+        {cards.map((p) => (
           <button
             key={p.title}
             type="button"
@@ -332,7 +324,7 @@ function EmptyState({ onPickPrompt }: { onPickPrompt: (text: string) => void }) 
             className="group flex flex-col items-start gap-0.5 rounded-xl border bg-card/40 px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/40 hover:bg-card"
           >
             <span className="font-medium leading-tight">{p.title}</span>
-            <span className="text-xs text-muted-foreground">{p.subtitle}</span>
+            <span className="text-xs text-muted-foreground">{p.sub}</span>
           </button>
         ))}
       </div>

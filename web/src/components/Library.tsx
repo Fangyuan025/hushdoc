@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { useDocuments } from "@/hooks/useDocuments"
 import { useScope } from "@/hooks/useScope"
+import { useT } from "@/lib/lang-context"
 import { cn } from "@/lib/utils"
 import type { FileMeta } from "@/types"
 
@@ -54,6 +55,7 @@ export interface LibraryProps {
 }
 
 export function Library({ onScopeChange }: LibraryProps) {
+  const t = useT()
   const {
     list,
     del,
@@ -167,12 +169,12 @@ export function Library({ onScopeChange }: LibraryProps) {
           {uploading ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Indexing…
+              {t("library.indexing")}
             </>
           ) : (
             <>
               <Plus className="h-3.5 w-3.5" />
-              Add to library
+              {t("library.addToLibrary")}
             </>
           )}
         </Button>
@@ -182,10 +184,10 @@ export function Library({ onScopeChange }: LibraryProps) {
             variant="destructive"
             className="text-xs"
             onClick={cancelUpload}
-            title="Cancel — finish the current file, then stop"
+            title={t("library.cancelTooltip")}
           >
             <Square className="h-3 w-3 fill-current" />
-            Cancel
+            {t("common.cancel")}
           </Button>
         )}
         {menuOpen && !uploading && (
@@ -386,11 +388,12 @@ function ScopeToolbar({
   onAll: () => void
   onNone: () => void
 }) {
+  const t = useT()
   const label = allSelected
-    ? `all ${total} in scope`
+    ? t("library.allNInScope", { n: total })
     : selected === 0
-      ? "all in scope"
-      : `${selected}/${total} in scope`
+      ? t("library.allInScope")
+      : t("library.nInScope", { n: selected, total })
   return (
     <div className="flex items-center justify-between px-1 text-[10px] text-muted-foreground">
       <span>{label}</span>
@@ -399,7 +402,7 @@ function ScopeToolbar({
         onClick={allSelected ? onNone : onAll}
         className="text-foreground/70 underline-offset-2 hover:underline"
       >
-        {allSelected ? "Select none" : "Select all"}
+        {t(allSelected ? "library.selectNone" : "library.selectAll")}
       </button>
     </div>
   )
@@ -504,6 +507,7 @@ function DeleteAllButton({
   onConfirm: () => void
   pending: boolean
 }) {
+  const t = useT()
   const [armed, setArmed] = useState(false)
   if (!armed) {
     return (
@@ -512,7 +516,7 @@ function DeleteAllButton({
         onClick={() => setArmed(true)}
         className="mt-2 w-full text-center text-[10px] text-muted-foreground/70 hover:text-destructive"
       >
-        Clear entire library…
+        {t("library.clearAll")}
       </button>
     )
   }
@@ -533,7 +537,7 @@ function DeleteAllButton({
         ) : (
           <Trash2 className="h-3.5 w-3.5" />
         )}
-        Confirm wipe all
+        {t("common.confirmDelete")}
       </Button>
       <Button
         size="sm"
@@ -541,7 +545,7 @@ function DeleteAllButton({
         className="text-xs"
         onClick={() => setArmed(false)}
       >
-        Cancel
+        {t("common.cancel")}
       </Button>
     </div>
   )
@@ -650,10 +654,10 @@ function Skeleton() {
 }
 
 function EmptyHint() {
+  const t = useT()
   return (
     <p className="px-1 text-[11px] leading-snug text-muted-foreground">
-      Your library is empty. Add a PDF, DOCX, image, or markdown note —
-      everything stays on your machine.
+      {t("library.empty")}
     </p>
   )
 }
