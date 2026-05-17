@@ -149,15 +149,21 @@ Kokoro-82M。
 
 **运行设置** —— v0.6.4 RAG pipeline · 索引语料为
 [《Attention Is All You Need》](https://arxiv.org/abs/1706.03762)
-原文（Docling 切完得 42 个 chunk） · 3 题标注集（涵盖数据集 /
-`d_model` / encoder-decoder 层数）· 被测模型 + Ragas judge 都用自带的
-**Qwen3-1.7B-Q4_K_M**（全程无外部 API 介入）：
+原文（Docling 切完得 42 个 chunk） · 被测模型 + Ragas judge 都用自带的
+**Qwen3-1.7B-Q4_K_M**（全程无外部 API 介入）。下表三个分项指标：**CP**
+= Context Precision（top-k 里 on-topic 的占比），**F** = Faithfulness
+（答案 claim 都能在 chunk 里找到出处，即无幻觉），**AR** = Answer
+Relevancy（答案确实在回答被问的事）：
 
-| 指标 | 得分 | 含义 |
-|---|---:|---|
-| **Faithfulness** | **1.000** | 答案里每个 claim 都能在检索 chunk 里找到出处（无幻觉） |
-| **Answer Relevancy** | **0.974** | 答案确实在回答被问的事 |
-| **Context Precision** | **0.906** | top-k 检索结果里真正与问题相关的占比 |
+| # | 问题 | CP | F | AR |
+|---|---|---:|---:|---:|
+| 1 | What dataset was used for the English-German translation experiments? | 0.967 | — | 0.996 |
+| 2 | What is the dimensionality of the model (`d_model`) in the base Transformer? | 0.750 | 1.000 | 1.000 |
+| 3 | How many encoder and decoder layers does the base Transformer have? | 1.000 | — | 0.927 |
+| | **均值** | **0.906** | **1.000** | **0.974** |
+
+`—` 表示 Ragas 的 claim-extractor 没能从那条回答里提出可校验的 claim
+（短 factoid 类回答常见），该题在该指标上被跳过，**不是失败**。
 
 在你自己的语料 + 你自己的题目集上复现：
 

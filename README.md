@@ -161,16 +161,24 @@ evaluation is air-gapped.
 
 **Run setup** — v0.6.4 RAG pipeline · indexed corpus is the original
 [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762) paper
-(42 chunks after Docling ingest) · 3-question labelled set covering
-dataset / `d_model` / encoder-decoder depth · bundled
-**Qwen3-1.7B-Q4_K_M** serves as both the generator AND the Ragas judge
-LLM (no external API in the loop):
+(42 chunks after Docling ingest) · bundled **Qwen3-1.7B-Q4_K_M**
+serves as both the generator AND the Ragas judge LLM (no external API
+in the loop). Three columns below — **CP** = Context Precision
+(fraction of top-k chunks on-topic), **F** = Faithfulness (every
+answer claim traces back to a retrieved chunk, i.e. no hallucination),
+**AR** = Answer Relevancy (answer actually addresses the question):
 
-| Metric | Score | What it measures |
-|---|---:|---|
-| **Faithfulness** | **1.000** | Every answer claim traces back to a retrieved chunk (i.e. no hallucination) |
-| **Answer Relevancy** | **0.974** | Answer actually addresses what was asked |
-| **Context Precision** | **0.906** | Fraction of top-k retrieved chunks that are on-topic for the question |
+| # | Question | CP | F | AR |
+|---|---|---:|---:|---:|
+| 1 | What dataset was used for the English-German translation experiments? | 0.967 | — | 0.996 |
+| 2 | What is the dimensionality of the model (`d_model`) in the base Transformer? | 0.750 | 1.000 | 1.000 |
+| 3 | How many encoder and decoder layers does the base Transformer have? | 1.000 | — | 0.927 |
+| | **Mean** | **0.906** | **1.000** | **0.974** |
+
+A `—` means Ragas's claim-extractor couldn't pull a checkable claim
+out of that answer (common when the answer is a single short
+factoid), so the question is skipped for that metric — it does NOT
+mean "failed".
 
 Reproduce against your own corpus + question set:
 
