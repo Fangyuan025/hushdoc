@@ -146,8 +146,40 @@ A few engineering choices that take Hushdoc past "embed-and-pray":
   the launcher offers to wipe local data.
 
 **Stack:** FastAPI + React 19 + Vite + Tailwind/shadcn ·
-llama.cpp (`llama-server`) · ChromaDB · IBM Docling · Whisper-base.en
-+ Kokoro-82M for voice.
+llama.cpp (`llama-server`) · ChromaDB + sentence-transformers
+(`all-MiniLM-L6-v2`) · IBM Docling · Whisper-base.en + Kokoro-82M
+for voice.
+
+---
+
+## Quality
+
+Numbers, not vibes. Hushdoc ships an offline [Ragas](https://github.com/explodinggradients/ragas)
+harness that scores the full RAG pipeline against a labelled question
+set — using the same local llama.cpp as the judge LLM, so the whole
+evaluation is air-gapped.
+
+Latest run, v0.6.4 pipeline, *Attention Is All You Need* indexed,
+bundled Qwen3-1.7B-Q4_K_M as both generator and judge:
+
+| Metric | Score | What it measures |
+|---|---:|---|
+| **Faithfulness** | **1.000** | Every answer claim traces back to a retrieved chunk (i.e. no hallucination) |
+| **Answer Relevancy** | **0.974** | Answer actually addresses what was asked |
+| **Context Precision** | **0.906** | Fraction of top-k retrieved chunks that are on-topic for the question |
+
+Reproduce on your own venv + indexed corpus:
+
+```bash
+.venv/Scripts/python.exe evaluate.py \
+  --test-set eval_dataset.json \
+  --include-context-precision \
+  --include-faithfulness
+```
+
+Results land under `eval_results/` as paired JSON + CSV (per-question
+breakdown in the CSV). Swap `--test-set` for your own labelled JSON
+of `{question, ground_truth}` to score on your domain.
 
 ---
 

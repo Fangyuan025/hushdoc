@@ -136,8 +136,38 @@ Hushdoc 走的是 OpenAI 兼容的 llama.cpp API，任何 llama.cpp 能加载的
 - **心跳驱动关停**——关浏览器，后端自动退出，启动器进入清理询问。
 
 **技术栈：** FastAPI + React 19 + Vite + Tailwind/shadcn ·
-llama.cpp（`llama-server`）· ChromaDB · IBM Docling · 语音是
-Whisper-base.en + Kokoro-82M。
+llama.cpp（`llama-server`）· ChromaDB + sentence-transformers
+（`all-MiniLM-L6-v2`）· IBM Docling · 语音是 Whisper-base.en +
+Kokoro-82M。
+
+---
+
+## 量化效果
+
+数字说话，不是凭感觉。Hushdoc 内置一套离线 [Ragas](https://github.com/explodinggradients/ragas)
+评测脚本，用同一份本地 llama.cpp 当 judge LLM，整套评测全程不出网。
+
+最近一次跑分（v0.6.4 pipeline，索引《Attention Is All You Need》，
+被测和 judge 都用自带的 Qwen3-1.7B-Q4_K_M）：
+
+| 指标 | 得分 | 含义 |
+|---|---:|---|
+| **Faithfulness** | **1.000** | 答案里每个 claim 都能在检索 chunk 里找到出处（无幻觉） |
+| **Answer Relevancy** | **0.974** | 答案确实在回答被问的事 |
+| **Context Precision** | **0.906** | top-k 检索结果里真正与问题相关的占比 |
+
+在你自己的 venv + 已索引语料上复现：
+
+```bash
+.venv/Scripts/python.exe evaluate.py \
+  --test-set eval_dataset.json \
+  --include-context-precision \
+  --include-faithfulness
+```
+
+结果落在 `eval_results/`，JSON + CSV 配对（CSV 是逐题明细）。
+把 `--test-set` 换成你自己的 `{question, ground_truth}` JSON 就能
+评测自己领域的题目。
 
 ---
 
