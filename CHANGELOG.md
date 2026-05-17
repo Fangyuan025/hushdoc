@@ -4,6 +4,21 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.2] — 2026-05-17
+
+Hotfix for v0.7.1.
+
+### Fixed
+- **`ErrorBoundary` catches "Rendered more hooks than during the
+  previous render" in `Sources.tsx`.** v0.7.1 added a ``useT()`` call
+  to ``Sources()`` ABOVE the existing ``if (!trace || trace.length
+  === 0) return null`` early-return, while ``useState(open)`` stayed
+  BELOW it — so the hook count flipped from 1 → 2 the moment a
+  message went from no-trace to has-trace, violating React's Rules
+  of Hooks. (The legacy code was already brittle; the i18n patch
+  surfaced the issue under normal use.) Moved ``useState(open)``
+  above the early return so both hooks run unconditionally.
+
 ## [0.7.1] — 2026-05-17
 
 Polish patch on the v0.7.0 bilingual rollout, plus a real backend

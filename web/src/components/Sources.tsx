@@ -39,9 +39,15 @@ export function Sources({ docs: _docs, standaloneQuery, trace, mode }: SourcesPr
   // the redundant chip row + Sources tab in the drawer are gone. This
   // component is now a thin "show retrieval trace" affordance for
   // debugging / power users, plus the standalone-query badge.
+  //
+  // v0.7.1: ALL hooks before any early return. The previous shape
+  // ``useT(); if (empty) return null; useState()`` violated Rules of
+  // Hooks the moment a render flipped between empty and non-empty
+  // trace (hook count jumped from 1 → 2). Move both hooks above the
+  // gate.
   const t = useT()
-  if (!trace || trace.length === 0) return null
   const [open, setOpen] = useState(false)
+  if (!trace || trace.length === 0) return null
 
   return (
     <div className="mt-1 flex justify-end">
