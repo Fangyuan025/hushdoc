@@ -38,11 +38,16 @@ web/*.log
 # v0.3.0 user settings (Settings page persists here; never goes in git)
 hushdoc_config.json
 
-# Eval + dev-only tests + test fixtures: kept locally for the maintainer,
-# not shipped to users (they don't need ragas / datasets / pyarrow for
-# the chat path, and the smoke / integration tests aren't part of the UX).
-evaluate.py
-eval_dataset.json
+# Dev-only tests + test fixtures: kept locally for the maintainer,
+# not shipped to users (the smoke / integration tests aren't part of
+# the public UX, and ``data/attention.pdf`` is a copyrighted academic
+# paper we can't redistribute).
+#
+# v0.6.5: ``evaluate.py`` + ``eval_dataset.json`` are NOW shipped --
+# they're advertised in README's Quality section so users need them
+# to reproduce the scores. ``ragas`` + ``datasets`` ship in
+# ``requirements-eval.txt`` (separate from the runtime requirements
+# so the chat path stays slim).
 smoke_test.py
 smoke_v*.py
 test_api.py

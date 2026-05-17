@@ -171,7 +171,13 @@ bundled Qwen3-1.7B-Q4_K_M as both generator and judge:
 Reproduce on your own venv + indexed corpus:
 
 ```bash
-.venv/Scripts/python.exe evaluate.py \
+# 1. One-time: the eval-only extras (ragas, datasets, pyarrow).
+#    Kept out of the main requirements so the chat path stays slim.
+pip install -r requirements-eval.txt
+
+# 2. Score against the bundled 3-question Transformer-paper set.
+#    Requires the paper indexed; see `data/attention.pdf` placeholder.
+python evaluate.py \
   --test-set eval_dataset.json \
   --include-context-precision \
   --include-faithfulness

@@ -1,0 +1,19 @@
+# Extra deps for the offline Ragas evaluation harness (``evaluate.py``).
+#
+# Kept separate from ``requirements.txt`` because the chat path doesn't
+# need ragas / datasets / pyarrow — every regular Hushdoc user would
+# otherwise eat ~300 MB of unused install. Install on demand:
+#
+#     pip install -r requirements-eval.txt
+#
+# Then re-run ``python evaluate.py --test-set eval_dataset.json
+# --include-context-precision --include-faithfulness`` to score the
+# RAG pipeline on your indexed corpus.
+
+ragas>=0.4.0
+datasets>=2.14.0
+# pyarrow is a transitive dep of ``datasets`` -- pinning it here so a
+# fresh ``pip install -r requirements-eval.txt`` doesn't trip on
+# wheel-availability changes.
+pyarrow>=15.0.0
+pandas>=2.0.0

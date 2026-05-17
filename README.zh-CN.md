@@ -159,7 +159,12 @@ Kokoro-82M。
 在你自己的 venv + 已索引语料上复现：
 
 ```bash
-.venv/Scripts/python.exe evaluate.py \
+# 1. 一次性装评测专用依赖（ragas / datasets / pyarrow），
+#    跟主 requirements 分开，聊天用户不背包袱。
+pip install -r requirements-eval.txt
+
+# 2. 跑自带的 3 题 Transformer 论文 set（需要先把论文索引进去）。
+python evaluate.py \
   --test-set eval_dataset.json \
   --include-context-precision \
   --include-faithfulness
