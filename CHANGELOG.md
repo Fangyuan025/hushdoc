@@ -4,6 +4,34 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.3] — 2026-05-17
+
+Two real bugs surfaced by post-v0.7.0 use.
+
+### Fixed
+- **Same-citation chip dedup works again.** When several adjacent
+  sentences cite the same ``[N]``, the frontend collapses the
+  repeated chips down to a single trailing chip ("…A. …B. …C [2].").
+  That stopped happening because the backend's
+  ``chain_grounding.resolve_citations`` was emitting each
+  ``SentenceBinding`` with ``start`` / ``end`` offsets pointing into
+  the **original** model answer, not the **final** answer it
+  returned. Any earlier auto-injection ("``[N]``") shifted every
+  subsequent sentence's true position, so the JS dedup pass sliced
+  the wrong substring and silently no-op'd. Rewrote
+  ``resolve_citations`` to track the output cursor and snapshot the
+  correct ``start`` for every binding — verified end-to-end via a
+  unit test that exercises both auto-inject and same-citation runs.
+- **Backend exits ~2.5 s after browser close, not ~7 s.** Heartbeat
+  watchdog tightened: ``GOODBYE_TIMEOUT_S`` dropped from 5 → 2 s
+  (the window we hold open after the ``?closing=1`` beacon, so a
+  reload's ``pagehide -> page-mount`` round-trip doesn't accidentally
+  shut us down — typical browser reload completes in <1 s, so 2 s is
+  still plenty of safety margin) and the watchdog poll cadence from
+  1.5 → 0.5 s. Overridable via ``HUSHDOC_GOODBYE_TIMEOUT`` and
+  ``HUSHDOC_WATCHDOG_POLL`` env vars. ``HEARTBEAT_TIMEOUT_S`` stays
+  at 60 because background-throttled tabs only ping once a minute.
+
 ## [0.7.2] — 2026-05-17
 
 Hotfix for v0.7.1.

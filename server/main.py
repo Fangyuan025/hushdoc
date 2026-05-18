@@ -1091,8 +1091,18 @@ async def voice_synthesize(req: VoiceSynthesizeRequest):
 # HUSHDOC_AUTO_SHUTDOWN=0 disables the watchdog so plain dev.sh /
 # uvicorn workflows aren't ambushed by it.
 # ---------------------------------------------------------------------------
+# v0.7.3: GOODBYE_TIMEOUT_S dropped from 5 → 2 and the watchdog
+# poll cadence (below) from 1.5 → 0.5. Total close-to-exit latency
+# went from up to ~7 s to ~2.5 s. The 2 s window still covers the
+# pagehide -> page-mount -> first-ping round-trip on a typical
+# browser reload (well under 1 s on every browser we've measured)
+# but doesn't leave the user waiting forever after they close the
+# tab. HEARTBEAT_TIMEOUT_S stays at 60 because background tabs
+# throttle their setIntervals to 1/minute and 60 s gives enough
+# headroom for one throttled ping to round-trip.
 HEARTBEAT_TIMEOUT_S = float(os.environ.get("HUSHDOC_HEARTBEAT_TIMEOUT", "60"))
-GOODBYE_TIMEOUT_S = float(os.environ.get("HUSHDOC_GOODBYE_TIMEOUT", "5"))
+GOODBYE_TIMEOUT_S = float(os.environ.get("HUSHDOC_GOODBYE_TIMEOUT", "2"))
+_WATCHDOG_POLL_S = float(os.environ.get("HUSHDOC_WATCHDOG_POLL", "0.5"))
 _AUTO_SHUTDOWN_ENABLED = os.environ.get("HUSHDOC_AUTO_SHUTDOWN", "1") != "0"
 _heartbeat_state = {
     "last_ts": 0.0,        # last regular ping
@@ -1118,10 +1128,10 @@ def heartbeat(closing: bool = False) -> dict:
 async def _heartbeat_watchdog() -> None:
     """Background loop: once the first heartbeat has arrived, exit either
     when the goodbye window expires or when the idle window expires.
-    Sleeps 1.5s so goodbye detection latency stays sub-second past the
-    GOODBYE_TIMEOUT_S threshold."""
+    Sleeps ``_WATCHDOG_POLL_S`` (default 0.5 s) so goodbye detection
+    latency is sub-second past the GOODBYE_TIMEOUT_S threshold."""
     while True:
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(_WATCHDOG_POLL_S)
         if not _heartbeat_state["ever_received"]:
             continue
 

@@ -571,13 +571,35 @@ def resolve_citations(
     if not sentences:
         return answer_text, []
 
+    # v0.7.3: SentenceBinding.start/end MUST point into the FINAL
+    # ``answer_text`` we return, not the original. The previous code
+    # used the input-text offsets, so any auto-injected [N] earlier in
+    # the answer pushed every later sentence's actual position past
+    # its recorded ``start``/``end``. The frontend's same-citation
+    # dedup pass (``displayContent`` in ChatMessage.tsx) ``slice(start,
+    # end)``s into the final text, so stale offsets meant it stripped
+    # chips from the wrong sentences -- often leaving the duplicate
+    # ``[N] [N] [N]`` run the dedup was supposed to collapse.
+    #
+    # ``out_offset`` tracks where the next ``new_parts`` push will land
+    # in the final string. We snapshot it for every binding.
     new_parts: List[str] = []
     cursor = 0
+    out_offset = 0
     out_bindings: List[SentenceBinding] = []
+
+    def _emit(s: str) -> int:
+        """Append ``s`` to ``new_parts``, return the start offset it
+        lands at in the final string. Updates ``out_offset``."""
+        nonlocal out_offset
+        start_offset = out_offset
+        new_parts.append(s)
+        out_offset += len(s)
+        return start_offset
 
     for start, end, sent in sentences:
         if start > cursor:
-            new_parts.append(answer_text[cursor:start])
+            _emit(answer_text[cursor:start])
         cursor = end
 
         # Parse [N] tags the model wrote inside this sentence.
@@ -594,9 +616,9 @@ def resolve_citations(
             model_ids.append(n)
 
         if not _is_factual_sentence(sent):
-            new_parts.append(sent)
+            sent_start = _emit(sent)
             out_bindings.append(SentenceBinding(
-                text=sent, start=start, end=end,
+                text=sent, start=sent_start, end=sent_start + len(sent),
                 citations=[], paragraphs=[],
             ))
             continue
@@ -638,11 +660,11 @@ def resolve_citations(
                     return match.group(0)
 
                 new_sent = body_re.sub(_swap, sent)
-                new_parts.append(new_sent)
+                sent_start = _emit(new_sent)
                 meta = (by_id[best_pid].metadata or {})
                 out_bindings.append(SentenceBinding(
                     text=new_sent,
-                    start=start, end=start + len(new_sent),
+                    start=sent_start, end=sent_start + len(new_sent),
                     citations=[best_pid],
                     paragraphs=[ParagraphBinding(
                         prompt_id=best_pid,
@@ -654,7 +676,7 @@ def resolve_citations(
                 ))
             else:
                 # Keep model's citations. Build bindings for each.
-                new_parts.append(sent)
+                sent_start = _emit(sent)
                 bindings: List[ParagraphBinding] = []
                 for pid in model_ids:
                     para, sc = _best_para_for(pid, sent)
@@ -669,7 +691,7 @@ def resolve_citations(
                         score=round(sc, 4),
                     ))
                 out_bindings.append(SentenceBinding(
-                    text=sent, start=start, end=end,
+                    text=sent, start=sent_start, end=sent_start + len(sent),
                     citations=model_ids,
                     paragraphs=bindings,
                 ))
@@ -683,19 +705,19 @@ def resolve_citations(
                 or best_para is None
                 or best_score < auto_min_score
             ):
-                new_parts.append(sent)
+                sent_start = _emit(sent)
                 out_bindings.append(SentenceBinding(
-                    text=sent, start=start, end=end,
+                    text=sent, start=sent_start, end=sent_start + len(sent),
                     citations=[], paragraphs=[],
                 ))
                 continue
             body, tail = _strip_trailing_period(sent)
             injected = f"{body} [{best_pid}]{tail}"
-            new_parts.append(injected)
+            sent_start = _emit(injected)
             meta = (by_id[best_pid].metadata or {})
             out_bindings.append(SentenceBinding(
                 text=injected,
-                start=start, end=start + len(injected),
+                start=sent_start, end=sent_start + len(injected),
                 citations=[best_pid],
                 paragraphs=[ParagraphBinding(
                     prompt_id=best_pid,
@@ -707,7 +729,7 @@ def resolve_citations(
             ))
 
     if cursor < len(answer_text):
-        new_parts.append(answer_text[cursor:])
+        _emit(answer_text[cursor:])
     return "".join(new_parts), out_bindings
 
 
