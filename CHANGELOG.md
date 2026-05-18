@@ -4,6 +4,57 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.6] — 2026-05-17
+
+End-to-end citation-quality pass. v0.7.5 fixed the "all chips
+disabled" symptom but the user pointed out the actual paragraph
+each chip pointed to was often a weak, only-loosely-related
+match — i.e. clicking a chip surfaced a paragraph that didn't
+really back the sentence. This release tightens the scoring +
+threshold layer with two targeted rules and validates them on
+real PDFs (Attention paper + a privacy paper) end-to-end.
+
+### Fixed
+- **Tier-A hard-strip floor (0.01).** If the model's primary
+  ``[N]`` shares literally zero tokens, runs, or entities with the
+  cited chunk, the chip is stripped. Catches the "model wrote a
+  citation for something completely unrelated" case (the probe's
+  ``"The capital of France is Paris [4]."`` example) that v0.7.5
+  was leaving in place because its only-floor-when-best-also-clears
+  guard was too lenient. Genuine cross-language paraphrases still
+  pass because they share at least one entity (e.g. "AI" / "GDPR"
+  / "2018" / a percentage) and clear the 0.01 threshold.
+- **Weak-secondary filter (0.18).** When the model writes
+  ``[primary][secondary][...]``, the primary is what it committed
+  to most strongly; secondaries are often "this also applies"
+  padding. If a secondary's best-paragraph score falls below the
+  threshold, the chip is stripped from the rendered text. Stops
+  the user from clicking a chip and getting a paragraph that
+  mentions the keyword but doesn't back the specific claim — the
+  probe found a 0.177-score secondary chip whose popover content
+  was a generic "attention mechanism" intro for an O(1) complexity
+  claim. Primary chip always survives so we never leave a sentence
+  un-cited.
+
+### Tuning summary
+
+| Threshold              | v0.7.4 | v0.7.5 | v0.7.6 |
+|------------------------|--------|--------|--------|
+| ``auto_min_score``     | 0.22   | 0.15   | 0.15   |
+| ``override_margin``    | 1.4    | 1.15   | 1.15   |
+| ``model_cite_floor``   | 0.05   | 0.05   | 0.05   |
+| ``hard_strip_score``   | —      | —      | 0.01   |
+| ``secondary_min_score``| —      | —      | 0.18   |
+
+### Validated
+12-case probe across two real PDFs (an ML paper + a HCI privacy
+paper) chunked the way the production pipeline would chunk them:
+every chip surfaced was either STRONG (≥ 0.35) or correctly
+stripped; the lone WEAK case (0.122) is a Chinese sentence vs an
+English source, where lexical scoring can't do better and the
+title-page binding is at least related to the topic. No BAD-
+score chips survive.
+
 ## [0.7.5] — 2026-05-17
 
 Citation post-v0.7.4 regressions + Chinese suggested-prompt leak.

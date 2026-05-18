@@ -527,6 +527,8 @@ def resolve_citations(
     auto_min_score: float = 0.15,
     override_margin: float = 1.15,
     model_cite_floor: float = 0.05,
+    secondary_min_score: float = 0.18,
+    hard_strip_score: float = 0.01,
 ) -> tuple[str, List[SentenceBinding]]:
     """v0.6.1 unified citation resolution.
 
@@ -699,6 +701,44 @@ def resolve_citations(
                 ))
             return out_b
 
+        # v0.7.6: weak-secondary filter. When the model writes
+        # ``[1][2][3]`` the primary [1] is the one it committed to;
+        # the secondaries are usually "this also applies" padding.
+        # When a secondary's paragraph score is below
+        # ``secondary_min_score`` the chip's popover would show a
+        # paragraph that doesn't really back the claim — the user
+        # clicks expecting evidence and gets a weakly-related blurb.
+        # Probe results on the Attention paper showed exactly this:
+        # ``[1][2]`` reroute kept a 0.177-score secondary [2] whose
+        # paragraph mentioned attention generically but not the
+        # specific O(1) claim. We strip those secondaries (the
+        # primary always survives — we never leave the sentence
+        # un-cited). Returns ``(stripped_text, kept_ids)``.
+        def _filter_weak_secondaries(
+            text: str,
+            ids: List[int],
+            scoring_text: str,
+        ) -> tuple[str, List[int]]:
+            if len(ids) <= 1:
+                return text, ids
+            keep = [ids[0]]
+            dropped: List[int] = []
+            for pid in ids[1:]:
+                _, sc = _best_para_for(pid, scoring_text)
+                if sc >= secondary_min_score:
+                    keep.append(pid)
+                else:
+                    dropped.append(pid)
+            if dropped:
+                # Strip dropped [pid] tags (and any leading space)
+                # from the text. Use a word-boundary look-ahead so
+                # "[1]" doesn't accidentally strip the "[" of "[12]".
+                for pid in dropped:
+                    text = re.sub(
+                        rf" ?\[{pid}\](?!\d)", "", text,
+                    )
+            return text, keep
+
         if not _is_factual_sentence(sent):
             # v0.7.5: a non-factual sentence may still carry a model-
             # written [N] (e.g. a section header line). Build paragraph
@@ -716,27 +756,35 @@ def resolve_citations(
 
         best_pid, best_para, best_score = _best_chunk_for(scoring_sent)
 
-        # v0.7.4: model_cite_floor — if the model's primary [N] doesn't
-        # match its referenced chunk at all (score below floor), strip
-        # that [N] from the sentence and fall through to the auto-
-        # inject path. Eliminates "model wrote [N] for completely
-        # unrelated source" complaints.
+        # v0.7.4 / v0.7.5 / v0.7.6 — three-tier model_cite_floor.
+        # The goal is to strip citations the model clearly got wrong
+        # while keeping legitimate paraphrases + cross-language pairs.
         #
-        # v0.7.5 caveat: only strip when SOME other chunk also scored
-        # above the floor. If no chunk matches the sentence at all
-        # (typically: bilingual query — the user wrote Chinese against
-        # an English source, so CJK tokens vs latin tokens score 0
-        # across the board) we trust the model's [N] rather than
-        # erasing the only signal we had. Was clobbering legitimate
-        # Chinese-against-English-doc citations in v0.7.4.
+        # Tier A (hard_strip): primary_score < 0.01 — literally no
+        #   token, run, or entity overlap between sentence and cited
+        #   chunk. ``capital of France [4]`` style. Always strip; no
+        #   linguistic case (paraphrase / cross-language) produces a
+        #   zero — a Chinese sentence vs an English chunk still
+        #   shares ``AI`` / ``GDPR`` / ``2018`` / digits.
+        # Tier B (model_cite_floor + best_score check, 0.05): primary
+        #   was a poor match BUT some other chunk also matches
+        #   poorly. Trust the model — typical "no chunk really
+        #   matches because the user paraphrased heavily" case.
+        # Tier C (model_cite_floor + a better alternative): primary
+        #   was poor AND another chunk is materially better — model
+        #   picked the wrong neighbour. Strip + let the auto-inject
+        #   pick the better chunk.
         if model_ids:
             _, _primary_score = _best_para_for(model_ids[0], scoring_sent)
-            if (
+            if _primary_score < hard_strip_score:
+                # Tier A — definitely wrong, no signal at all.
+                sent = re.sub(r" ?\[\d+\]", "", sent)
+                model_ids = []
+            elif (
                 _primary_score < model_cite_floor
                 and best_score >= model_cite_floor
             ):
-                # Strip ALL ``[N]`` tags + their leading space so we
-                # don't leave "... sunny ." (double-spaced period).
+                # Tier C — wrong; auto-inject will pick the right one.
                 sent = re.sub(r" ?\[\d+\]", "", sent)
                 model_ids = []
 
@@ -785,7 +833,6 @@ def resolve_citations(
                     return match.group(0)
 
                 new_sent = body_re.sub(_swap, sent)
-                sent_start = _emit(new_sent)
                 # v0.7.5: bindings now cover BOTH best_pid (the
                 # rerouted primary) AND any secondary model_ids that
                 # survived in new_sent — those chips would otherwise
@@ -796,18 +843,33 @@ def resolve_citations(
                 for sid in model_ids[1:]:
                     if sid in by_id and sid != best_pid:
                         rewritten_ids.append(sid)
+                # v0.7.6: drop weak secondaries from the rewritten
+                # sentence so a multi-cite "[best][weak]" doesn't
+                # render a chip whose popover content doesn't back
+                # the sentence.
+                clean_scoring_sent = (
+                    _INLINE_CITATION_RE.sub("", new_sent).strip()
+                    or new_sent
+                )
+                new_sent, rewritten_ids = _filter_weak_secondaries(
+                    new_sent, rewritten_ids, clean_scoring_sent,
+                )
+                sent_start = _emit(new_sent)
                 out_bindings.append(SentenceBinding(
                     text=new_sent,
                     start=sent_start, end=sent_start + len(new_sent),
                     citations=rewritten_ids,
                     paragraphs=_bindings_for_ids(
-                        rewritten_ids,
-                        _INLINE_CITATION_RE.sub("", new_sent).strip()
-                        or new_sent,
+                        rewritten_ids, clean_scoring_sent,
                     ),
                 ))
             else:
-                # Keep model's citations. Build bindings for each.
+                # Keep model's citations. v0.7.6: drop weak
+                # secondaries first so the rendered text only carries
+                # chips whose paragraph actually backs the sentence.
+                sent, model_ids = _filter_weak_secondaries(
+                    sent, model_ids, scoring_sent,
+                )
                 sent_start = _emit(sent)
                 bindings: List[ParagraphBinding] = []
                 for pid in model_ids:
