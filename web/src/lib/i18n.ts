@@ -58,6 +58,21 @@ const EN = {
   "chat.examples.fact.sub": "with an inline citation",
   "chat.examples.simple.title": "Explain it simply",
   "chat.examples.simple.sub": "for a non-expert",
+  // v0.7.5: the prompt bodies the suggestion cards drop into the
+  // chat box. v0.7.4 hard-coded English here even when the UI was
+  // running in Chinese — the user clicked a 中文 card and the input
+  // filled with English. These are now translated alongside the
+  // titles/subtitles so the experience is consistent end-to-end.
+  // The bodies still mention "the documents" so retrieval picks up
+  // the same signal as the English version.
+  "chat.examples.summarize.body":
+    "Give me a concise summary of the documents I've uploaded.",
+  "chat.examples.compare.body":
+    "Pick two of the indexed documents and compare their main arguments — where do they agree and disagree?",
+  "chat.examples.fact.body":
+    "What does the document say about <topic>? Cite the page.",
+  "chat.examples.simple.body":
+    "Explain the core idea of the most recent document I uploaded as if I'm a smart non-expert.",
   "chat.inputPlaceholder": "Ask anything about your documents...",
   "chat.footer": "Hushdoc runs entirely on your machine — nothing leaves it.",
 
@@ -225,6 +240,12 @@ const ZH: Dict = {
   "chat.examples.fact.sub": "并附上行内引用",
   "chat.examples.simple.title": "用大白话解释",
   "chat.examples.simple.sub": "讲给外行听",
+  "chat.examples.summarize.body": "帮我把已上传的文档简要总结一下。",
+  "chat.examples.compare.body":
+    "从已索引的文档里挑两篇,对比一下它们的核心观点 —— 哪些相互呼应,哪些彼此冲突?",
+  "chat.examples.fact.body": "文档里关于 <主题> 是怎么说的?请附上页码。",
+  "chat.examples.simple.body":
+    "把我最近上传的那篇文档的核心思想讲一讲,讲得我这种聪明但非专业的人也能听明白。",
   "chat.inputPlaceholder": "针对你的文档,随便问…",
   "chat.footer": "Hushdoc 完全在你的电脑上运行 —— 不出网。",
 

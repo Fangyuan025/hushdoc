@@ -284,24 +284,21 @@ export const ChatPane = forwardRef<ChatPaneHandle, ChatPaneProps>(
   },
 )
 
-// Suggested prompts are i18n'd by the EmptyState below; the prompt
-// the LLM actually receives is kept in English so retrieval works
-// the same regardless of UI language. (Bilingual chat itself is
-// already supported — the user can re-type in Chinese.)
-const SUGGESTED_PROMPT_BODIES = [
-  "Give me a concise summary of the documents I've uploaded.",
-  "Pick two of the indexed documents and compare their main arguments — where do they agree and disagree?",
-  "What does the document say about <topic>? Cite the page.",
-  "Explain the core idea of the most recent document I uploaded as if I'm a smart non-expert.",
-] as const
+// v0.7.5: prompt bodies are now i18n keys too. Pre-v0.7.5 the cards'
+// titles/subs were translated but the BODY (what fills the chat
+// input when you click a card) was hard-coded English — so a 中文
+// user clicking a Chinese card got an English question dropped into
+// their input. Now en + zh are paired through ``t()``; if you add a
+// new card, add the matching ``chat.examples.<key>.body`` to both
+// language blocks in lib/i18n.ts.
 
 function EmptyState({ onPickPrompt }: { onPickPrompt: (text: string) => void }) {
   const t = useT()
   const cards = [
-    { title: t("chat.examples.summarize.title"), sub: t("chat.examples.summarize.sub"), prompt: SUGGESTED_PROMPT_BODIES[0] },
-    { title: t("chat.examples.compare.title"),  sub: t("chat.examples.compare.sub"),  prompt: SUGGESTED_PROMPT_BODIES[1] },
-    { title: t("chat.examples.fact.title"),     sub: t("chat.examples.fact.sub"),     prompt: SUGGESTED_PROMPT_BODIES[2] },
-    { title: t("chat.examples.simple.title"),   sub: t("chat.examples.simple.sub"),   prompt: SUGGESTED_PROMPT_BODIES[3] },
+    { title: t("chat.examples.summarize.title"), sub: t("chat.examples.summarize.sub"), prompt: t("chat.examples.summarize.body") },
+    { title: t("chat.examples.compare.title"),  sub: t("chat.examples.compare.sub"),  prompt: t("chat.examples.compare.body") },
+    { title: t("chat.examples.fact.title"),     sub: t("chat.examples.fact.sub"),     prompt: t("chat.examples.fact.body") },
+    { title: t("chat.examples.simple.title"),   sub: t("chat.examples.simple.sub"),   prompt: t("chat.examples.simple.body") },
   ]
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 px-2 text-center">

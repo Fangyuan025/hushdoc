@@ -662,24 +662,79 @@ def resolve_citations(
             seen.add(n)
             model_ids.append(n)
 
+        # v0.7.5: bug spotted by the smoke-test grid — the literal
+        # "[4]" tag in a sentence like "The sky is sunny [4]." was
+        # being passed to ``_score_paragraph`` verbatim, which then
+        # parsed "4" as an entity. Any chunk containing the digit 4
+        # (a percentage, a year, a section number...) scored an
+        # entity_bonus of 0.35 and the model_cite_floor never tripped,
+        # so the wrong [N] survived. Score on a stripped copy of the
+        # sentence so the citation tag itself never contributes to
+        # the match. The original ``sent`` is still what gets emitted.
+        scoring_sent = _INLINE_CITATION_RE.sub("", sent).strip() or sent
+
+        # v0.7.5: bindings_for_ids builds paragraph bindings for every
+        # in-scope prompt_id, used by every branch below + the
+        # post-process orphan sweep. Centralises the "always have a
+        # binding per surviving [N]" invariant the frontend needs to
+        # avoid rendering disabled chips.
+        def _bindings_for_ids(
+            ids: List[int],
+            scoring_sent: str,
+        ) -> List[ParagraphBinding]:
+            out_b: List[ParagraphBinding] = []
+            for pid in ids:
+                if pid not in by_id:
+                    continue
+                para, sc = _best_para_for(pid, scoring_sent)
+                meta = (by_id[pid].metadata or {})
+                out_b.append(ParagraphBinding(
+                    prompt_id=pid,
+                    filename=str(meta.get("filename", "")),
+                    page=meta.get("page"),
+                    paragraph=para or (
+                        para_cache.get(pid, [""])[0] if pid in para_cache else ""
+                    ),
+                    score=round(sc, 4),
+                ))
+            return out_b
+
         if not _is_factual_sentence(sent):
+            # v0.7.5: a non-factual sentence may still carry a model-
+            # written [N] (e.g. a section header line). Build paragraph
+            # bindings for any valid model_ids so the frontend's hover
+            # popover works on those chips too. We DON'T auto-inject
+            # for non-factual sentences — that'd add chips to greetings
+            # and section headers.
             sent_start = _emit(sent)
             out_bindings.append(SentenceBinding(
                 text=sent, start=sent_start, end=sent_start + len(sent),
-                citations=[], paragraphs=[],
+                citations=list(model_ids),
+                paragraphs=_bindings_for_ids(model_ids, scoring_sent),
             ))
             continue
 
-        best_pid, best_para, best_score = _best_chunk_for(sent)
+        best_pid, best_para, best_score = _best_chunk_for(scoring_sent)
 
         # v0.7.4: model_cite_floor — if the model's primary [N] doesn't
         # match its referenced chunk at all (score below floor), strip
         # that [N] from the sentence and fall through to the auto-
         # inject path. Eliminates "model wrote [N] for completely
         # unrelated source" complaints.
+        #
+        # v0.7.5 caveat: only strip when SOME other chunk also scored
+        # above the floor. If no chunk matches the sentence at all
+        # (typically: bilingual query — the user wrote Chinese against
+        # an English source, so CJK tokens vs latin tokens score 0
+        # across the board) we trust the model's [N] rather than
+        # erasing the only signal we had. Was clobbering legitimate
+        # Chinese-against-English-doc citations in v0.7.4.
         if model_ids:
-            _, _primary_score = _best_para_for(model_ids[0], sent)
-            if _primary_score < model_cite_floor:
+            _, _primary_score = _best_para_for(model_ids[0], scoring_sent)
+            if (
+                _primary_score < model_cite_floor
+                and best_score >= model_cite_floor
+            ):
                 # Strip ALL ``[N]`` tags + their leading space so we
                 # don't leave "... sunny ." (double-spaced period).
                 sent = re.sub(r" ?\[\d+\]", "", sent)
@@ -691,20 +746,30 @@ def resolve_citations(
             # the model also wrote [2][3] we'll keep them as additional
             # citations attached to their own best paragraphs.)
             primary = model_ids[0]
-            model_para, model_score = _best_para_for(primary, sent)
+            model_para, model_score = _best_para_for(primary, scoring_sent)
+            # v0.7.5 sub-fix: if the model already cited best_pid as a
+            # secondary id ([primary][best_pid][...]) the override would
+            # duplicate best_pid (text becomes "[best_pid][best_pid]
+            # [...]"), giving the reader two visually-identical adjacent
+            # chips. Trust the model in that case — it knew best_pid
+            # was relevant; the primary chip stays in case the model's
+            # ordering was deliberate.
+            best_already_cited = (
+                best_pid is not None and best_pid in model_ids
+            )
             # Reroute if a different chunk is materially better.
             if (
                 best_pid is not None
                 and best_pid != primary
+                and not best_already_cited
                 and best_score >= auto_min_score
                 and best_score >= override_margin * max(model_score, 0.01)
             ):
                 # Rewrite the sentence's [primary] → [best_pid] (only
                 # the first [N] gets rewritten; secondary citations
-                # stay as-is). Drop secondary [N] for now since they
-                # weren't accurate either.
+                # stay in the text AND keep their own bindings so
+                # they render as live chips, not disabled).
                 body_re = re.compile(r"\[(\d{1,3})\]")
-                # Replace only the FIRST [N] that matches `primary`.
                 replaced = False
 
                 def _swap(match: re.Match) -> str:
@@ -721,25 +786,32 @@ def resolve_citations(
 
                 new_sent = body_re.sub(_swap, sent)
                 sent_start = _emit(new_sent)
-                meta = (by_id[best_pid].metadata or {})
+                # v0.7.5: bindings now cover BOTH best_pid (the
+                # rerouted primary) AND any secondary model_ids that
+                # survived in new_sent — those chips would otherwise
+                # render as disabled because the binding list omitted
+                # them. citations stays in encounter order in the
+                # rewritten text.
+                rewritten_ids: List[int] = [best_pid]
+                for sid in model_ids[1:]:
+                    if sid in by_id and sid != best_pid:
+                        rewritten_ids.append(sid)
                 out_bindings.append(SentenceBinding(
                     text=new_sent,
                     start=sent_start, end=sent_start + len(new_sent),
-                    citations=[best_pid],
-                    paragraphs=[ParagraphBinding(
-                        prompt_id=best_pid,
-                        filename=str(meta.get("filename", "")),
-                        page=meta.get("page"),
-                        paragraph=best_para or "",
-                        score=round(best_score, 4),
-                    )],
+                    citations=rewritten_ids,
+                    paragraphs=_bindings_for_ids(
+                        rewritten_ids,
+                        _INLINE_CITATION_RE.sub("", new_sent).strip()
+                        or new_sent,
+                    ),
                 ))
             else:
                 # Keep model's citations. Build bindings for each.
                 sent_start = _emit(sent)
                 bindings: List[ParagraphBinding] = []
                 for pid in model_ids:
-                    para, sc = _best_para_for(pid, sent)
+                    para, sc = _best_para_for(pid, scoring_sent)
                     meta = (by_id[pid].metadata or {})
                     bindings.append(ParagraphBinding(
                         prompt_id=pid,
@@ -790,7 +862,82 @@ def resolve_citations(
 
     if cursor < len(answer_text):
         _emit(answer_text[cursor:])
-    return "".join(new_parts), out_bindings
+    final_text = "".join(new_parts)
+
+    # v0.7.5: orphan-chip sweep. The frontend's CitationChip renders
+    # ``binding === undefined`` as a disabled (dashed-border, muted)
+    # chip — exactly the "all citations show up as 失效" symptom the
+    # user reported in v0.7.4. We can hit that state through subtle
+    # paths: e.g. the model wrote ``[2]`` inside a non-factual
+    # sentence where we previously emitted ``paragraphs=[]``, or the
+    # override branch left a secondary id in the rewritten text
+    # without a binding. The branches above were patched, but the
+    # invariant deserves a belt-and-braces final sweep — walk the
+    # FINAL text, find every surviving ``[N]``, and ensure each one
+    # has at least one binding in ``out_bindings``. Anything still
+    # orphaned gets a synthetic zero-length SentenceBinding at the
+    # tail carrying the missing ParagraphBindings.
+    # First, strip any ``[N]`` whose id is not in ``by_id`` at all.
+    # ``sanitize_answer_citations`` upstream gates on ``len(all_docs)``,
+    # but if a caller passes a kept_docs subset whose prompt_ids don't
+    # cover the full sanitised range we'd otherwise leave dangling
+    # chips that render as "disabled" placeholders. Belt and braces.
+    if by_id:
+        def _drop_unknown(m: re.Match) -> str:
+            try:
+                n = int(m.group(1))
+            except ValueError:
+                return ""
+            return m.group(0) if n in by_id else ""
+
+        stripped = _INLINE_CITATION_RE.sub(_drop_unknown, final_text)
+        if stripped != final_text:
+            # Tidy "claim ." -> "claim." and squeezed double spaces.
+            stripped = re.sub(r" +([.,;:!?。！？])", r"\1", stripped)
+            stripped = re.sub(r"  +", " ", stripped)
+            final_text = stripped
+
+    bound_ids: set = set()
+    for sb in out_bindings:
+        for pb in sb.paragraphs:
+            bound_ids.add(pb.prompt_id)
+    orphans: List[int] = []
+    seen_orphan: set = set()
+    for m in _INLINE_CITATION_RE.finditer(final_text):
+        try:
+            n = int(m.group(1))
+        except ValueError:
+            continue
+        if n in by_id and n not in bound_ids and n not in seen_orphan:
+            seen_orphan.add(n)
+            orphans.append(n)
+    if orphans:
+        tail_para_bindings: List[ParagraphBinding] = []
+        for pid in orphans:
+            # Score against the whole answer for a "best paragraph"
+            # guess — better than a blank popover. The chip itself
+            # doesn't use the score, only the paragraph text +
+            # filename + page, so a coarse pick is fine here.
+            para, sc = _best_para_for(pid, final_text)
+            meta = (by_id[pid].metadata or {})
+            tail_para_bindings.append(ParagraphBinding(
+                prompt_id=pid,
+                filename=str(meta.get("filename", "")),
+                page=meta.get("page"),
+                paragraph=para or (
+                    para_cache.get(pid, [""])[0] if pid in para_cache else ""
+                ),
+                score=round(sc, 4),
+            ))
+        out_bindings.append(SentenceBinding(
+            text="",
+            start=len(final_text),
+            end=len(final_text),
+            citations=[],
+            paragraphs=tail_para_bindings,
+        ))
+
+    return final_text, out_bindings
 
 
 def filter_kept_docs_to_cited(

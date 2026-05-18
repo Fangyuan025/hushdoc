@@ -4,6 +4,72 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.5] — 2026-05-17
+
+Citation post-v0.7.4 regressions + Chinese suggested-prompt leak.
+User report: "either all chips show up as 失效 (disabled), or there
+are no chips at all" and "中文版的 suggest prompt 仍是英文". Both
+fixed; this release leaves the citation pipeline in a much more
+forgiving state and finishes the i18n surface for the suggestion
+cards.
+
+### Fixed
+- **Citation tag contaminated its own scoring.** ``[4]`` in a
+  sentence like ``"The sky is sunny [4]."`` was being passed
+  verbatim to ``_score_paragraph``; the regex parsed the literal
+  ``4`` as an entity, so any chunk containing a digit ``4``
+  (percentages, years, section numbers...) scored an
+  ``entity_bonus`` of 0.35 and the model_cite_floor never tripped.
+  Wrong citations survived. Now strips ``[N]`` from a scoring copy
+  of the sentence before passing to the scorer; the original
+  sentence is still what gets emitted.
+- **Cross-language sentences lost their citations.** The v0.7.4
+  ``model_cite_floor`` stripped any ``[N]`` whose chunk-paragraph
+  match scored below 0.05. A Chinese sentence against an English
+  source has zero token overlap → score 0 → cite stripped, even
+  when the model's pick was correct. Now the floor only fires when
+  SOME OTHER chunk also clears the floor (i.e. the model picked
+  wrong on purpose, not "no chunk matches at all").
+- **Orphan-chip post-process sweep.** Belt-and-braces invariant:
+  every ``[N]`` that survives in the final answer text now has a
+  paragraph binding in ``out_bindings``. Covers the edge cases
+  the per-branch fixes might miss — e.g. a non-factual sentence
+  carrying a model ``[N]``, or a multi-cite override where the
+  rewritten secondary id wasn't represented. A trailing zero-
+  length ``SentenceBinding`` carries any leftover bindings.
+- **Unknown ``[N]`` stripped from final text.** If a caller passes
+  a ``kept_docs`` subset whose prompt_ids don't cover the
+  sanitised range, the surviving stray ``[N]`` is now dropped
+  cleanly (with surrounding whitespace tidied) instead of
+  rendering as a disabled chip.
+- **``override`` no longer creates ``[X][X]`` duplicates.** When
+  the model already cited ``best_pid`` as a secondary id
+  (``[primary][best_pid][...]``), rerouting ``primary → best_pid``
+  used to produce ``[best_pid][best_pid][...]`` — two visually
+  identical adjacent chips. The override now skips when
+  ``best_pid`` is already in ``model_ids``; we trust the model's
+  ordering in that case.
+- **Bindings built for non-factual + override secondaries.**
+  Non-factual sentences carrying a model ``[N]`` no longer emit
+  ``paragraphs=[]`` (the chip used to render disabled). The
+  override branch also now builds bindings for ``model_ids[1:]``
+  that survived in the rewritten text. Both were paths to the
+  "all chips 失效" symptom.
+
+### Changed
+- **i18n covers the suggestion-card BODY.** v0.7.4 translated the
+  card title/sub but the prompt that filled the chat input on
+  click was still hard-coded English — so a 中文 user got an
+  English question dropped into a Chinese conversation. Four new
+  keys (``chat.examples.*.body``) wire the body through ``t()``;
+  Chinese-mode users now get the Chinese prompt.
+
+The smoke grid (``_smoke_grounding.py``, run-once helper) covers
+10 cases: valid cite, wrong-cite override, bogus cite, multi-cite
+override, non-factual + cite, no-cite → auto-inject, paraphrase
+auto-inject, Chinese-vs-English doc, same-id twice, out-of-range
+``[N]``. All ten produce zero-orphan chips.
+
 ## [0.7.4] — 2026-05-17
 
 User-reported two follow-on issues post-v0.7.3:
