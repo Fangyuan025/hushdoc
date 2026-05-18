@@ -35,6 +35,12 @@ web/*.log
 /*.err
 .claude/
 
+# Maintainer-only marketing source. The NotebookLM-ready
+# introduction script is intended as input for video generation;
+# it intentionally repeats README content in narration form and
+# would just clutter the public repo if shipped.
+introduction-of-hushdoc.md
+
 # v0.3.0 user settings (Settings page persists here; never goes in git)
 hushdoc_config.json
 
