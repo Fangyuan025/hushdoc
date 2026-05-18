@@ -155,12 +155,12 @@ Kokoro-82M。
 （答案 claim 都能在 chunk 里找到出处，即无幻觉），**AR** = Answer
 Relevancy（答案确实在回答被问的事）：
 
-| # | 问题 | CP | F | AR |
-|---|---|---:|---:|---:|
-| 1 | What dataset was used for the English-German translation experiments? | 0.967 | — | 0.996 |
-| 2 | What is the dimensionality of the model (`d_model`) in the base Transformer? | 0.750 | 1.000 | 1.000 |
-| 3 | How many encoder and decoder layers does the base Transformer have? | 1.000 | — | 0.927 |
-| | **均值** | **0.906** | **1.000** | **0.974** |
+| # | 问题 | 模型回答(v0.6.4 原文) | CP | F | AR |
+|---|---|---|---:|---:|---:|
+| 1 | What dataset was used for the English-German translation experiments? | The dataset used for the English-German translation experiments was the standard WMT 2014 English-German dataset consisting of about 4.5 million sentence pairs. This dataset was used for training the model, with sentences encoded using byte-pair encoding and a shared source-target vocabulary of about 37000 tokens. The training was conducted on 8 P100 GPUs, and the results are summarized in Table 2. | 0.967 | — | 0.996 |
+| 2 | What is the dimensionality of the model (`d_model`) in the base Transformer? | The dimensionality of the model (`d_model`) in the base Transformer is 512 [4]. | 0.750 | 1.000 | 1.000 |
+| 3 | How many encoder and decoder layers does the base Transformer have? | The base Transformer has N = 6 encoder and decoder layers [3]. | 1.000 | — | 0.927 |
+| | **均值** | | **0.906** | **1.000** | **0.974** |
 
 `—` 表示 Ragas 的 claim-extractor 没能从那条回答里提出可校验的 claim
 （短 factoid 类回答常见），该题在该指标上被跳过，**不是失败**。
