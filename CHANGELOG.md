@@ -4,6 +4,35 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.7] — 2026-05-17
+
+User-reported: assistant replies in Chinese mode were rendering as
+"① 文档 1 (页面 5): 用户态度较为正面 (M=3.94)..." — the model was
+echoing the context's chunk-header layout ("[N] filename (page X)")
+into its answer instead of writing prose, then the UI turned the
+literal "[1]" into a chip leaving the redundant "文档 1 (页面 5):"
+text right next to it. Same failure mode in English: "Document 1
+(page 5): ...".
+
+### Fixed
+- **Prompt: forbid context-header echo.** Added a hard rule to
+  ``ANSWER_SYSTEM`` explicitly telling the model not to write
+  ``"Document 1 (page 5):"`` / ``"文档 1 (页面 5):"`` /
+  ``"根据文档 1, ..."`` — those mirror the chunk-header layout,
+  not an answer. The UI renders filename + page from the [N] chip
+  via hover popover, so the model never needs to spell them out.
+- **Post-hoc stripper** (``strip_leaked_context_headers``). Safety
+  net for when the 1.7B model doesn't fully comply with the prompt
+  rule. Detects and removes the leaked layout prefix while keeping
+  the ``[N]`` chip + its binding intact, so the chip/popover logic
+  is unaffected. Both EN ("Per Document 2, ...", "Doc 1, p.5: ...",
+  "Document 1 says:") and ZH ("文档 1 (页面 5):", "根据文档1,",
+  "文献 2") patterns covered. Anchored to start-of-line, post-``[N]``,
+  or post-bullet so legitimate prose like "The document mentions
+  the privacy paradox [1]." stays untouched. 11-case smoke covering
+  multi-occurrence, bullet-prefix, and four don't-touch negatives
+  passes.
+
 ## [0.7.6] — 2026-05-17
 
 End-to-end citation-quality pass. v0.7.5 fixed the "all chips

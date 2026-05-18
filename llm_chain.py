@@ -188,6 +188,14 @@ ANSWER_SYSTEM = (
     "     and can't trace it to a specific [N], OMIT it entirely.\n"
     "   - Do NOT add a 'References:' / 'Sources:' section. Inline [N] "
     "     tags are the only citation surface.\n"
+    "   - Do NOT echo the context's header layout in your answer. The "
+    "     header '[N] filename (page X)' / '[N] 文档 1 (页面 5)' is "
+    "     CONTEXT formatting -- it must not appear in your reply. Never "
+    "     write 'Document 1 says ...' / 'Doc 1: ...' / '文档 1 (页面 5)' "
+    "     / '根据文档1, ...' -- those mirror the context layout instead "
+    "     of producing an answer. Use only inline [N] tags at sentence "
+    "     ends; the UI renders filename + page from [N] via a hover "
+    "     popover, so you never need to spell them out.\n"
     "7. Be concise. Do not repeat yourself. Do not fabricate quotes."
 )
 
@@ -770,6 +778,71 @@ def sanitize_answer_citations(answer_text: str, max_id: int) -> str:
     # Tidy: " ." → ".", " ," → ",", etc. and squeeze doubled spaces.
     out = re.sub(r" +([.,;:!?。！？])", r"\1", out)
     out = re.sub(r"  +", " ", out)
+    return out
+
+
+# v0.7.7: even with the strengthened prompt rule, Qwen-1.7B sometimes
+# leaks the context-header layout into its answer — typically as a
+# bullet/section prefix like "[N] 文档 1 (页面 5): " or
+# "Document 1 (page 5):" or "根据文档1, ...". Those echo the chunk
+# header format from format_documents() and read as redundant garbage
+# to the user (they already see the [N] chip; the filename + page
+# appear in its hover popover). Strip the leaked prefix while keeping
+# the [N] tag intact so the chip + binding logic still fires.
+# Anchor: start-of-line, after a closing ']' (citation chip), or
+# right after a bullet/numbered-list marker. Keeps us from eating
+# into legitimate prose like "the document mentions ..." that
+# happens to contain the word "document".
+_HEADER_ANCHOR = r"(?:^|(?<=\])|(?<=^- )|(?<=^\* )|(?<=^\d\. ))"
+
+_LEAKED_HEADER_PATTERNS = (
+    # English: "Document 1 (page 5):" / "Doc 1, p. 5: " / "Document
+    # 1 says:" / "Per Document 1, ...". Optional discourse opener.
+    re.compile(
+        r"(?im)" + _HEADER_ANCHOR + r"\s*"
+        r"(?:per\s+|according\s+to\s+|based\s+on\s+|from\s+)?"
+        r"(?:document|doc|source)\s*\d+"
+        r"(?:\s*[(,]\s*(?:page|p\.?)\s*\d+\s*\)?)?"
+        r"\s*(?:says|:|,|—|-)?\s*",
+    ),
+    # Chinese: "文档 1 (页面 5)" / "文档1" / "根据文档1," /
+    # "文献 2, 页 3:" / "出处 1:".
+    re.compile(
+        r"(?m)" + _HEADER_ANCHOR + r"\s*"
+        r"(?:根据|参考|出自|来自|引用|出处)?"
+        r"\s*(?:文档|文献|来源|出处|资料)\s*\d+"
+        r"(?:\s*[((]\s*(?:页面?|第?\s*页)\s*\d+\s*[))])?"
+        r"\s*(?:中|内|里)?\s*(?:[::,,、—-]|提到|指出|说)?\s*",
+    ),
+)
+
+
+def strip_leaked_context_headers(answer_text: str) -> str:
+    """Remove "Document N (page X):" / "文档 N (页面 X):" style
+    prefixes the model sometimes echoes from the chunk-header layout.
+
+    Run AFTER sanitize_answer_citations (so we operate on text that
+    already has stable [N] tags) and BEFORE resolve_citations (so the
+    sentence offsets resolve_citations computes match the final text
+    the frontend renders)."""
+    if not answer_text:
+        return answer_text
+    out = answer_text
+    for pat in _LEAKED_HEADER_PATTERNS:
+        out = pat.sub("", out)
+    # Tidy any artefacts:
+    #  - "[N]:" / "[N],"   →  "[N] "   (leftover separator after strip)
+    #  - "[N]X"            →  "[N] X"  (latin letter immediately after
+    #                                   chip — CJK adjacency stays
+    #                                   tight per CJK typography)
+    out = re.sub(r"\[(\d{1,3})\]\s*[:：,，]\s*", r"[\1] ", out)
+    out = re.sub(r"\[(\d{1,3})\](?=[A-Za-z])", r"[\1] ", out)
+    out = re.sub(r"  +", " ", out)
+    # Strip empty bullet / header lines we may have created (e.g.
+    # the whole line was just "文档 1 (页面 5):" with no content
+    # after — the strip leaves a sole "- " marker).
+    out = re.sub(r"(?m)^[-*]\s*$\n?", "", out)
+    out = re.sub(r"(?m)^\d\.\s*$\n?", "", out)
     return out
 
 
@@ -1416,6 +1489,11 @@ class RAGChain:
         # tag. Sources are then exactly the chunks whose ids appear
         # in the (possibly auto-rewritten) answer.
         answer_text = sanitize_answer_citations(answer_text, len(all_docs))
+        # v0.7.7: strip "[N] 文档 1 (页面 5):" / "Document 1 (page 5):"
+        # context-header echoes — the model sometimes mirrors the chunk
+        # layout instead of writing prose. The [N] stays so the chip
+        # + binding logic is unaffected.
+        answer_text = strip_leaked_context_headers(answer_text)
         answer_text, bindings = resolve_citations(answer_text, all_docs)
         cited = filter_kept_docs_to_cited(all_docs, answer_text)
         sentence_bindings = bindings_to_payload(bindings)
@@ -1621,6 +1699,9 @@ class RAGChain:
         # ignore citation instructions on some prompt rolls.
         cleaned = self._strip_reasoning(full_raw)
         cleaned = sanitize_answer_citations(cleaned, len(docs))
+        # v0.7.7: same context-header-echo strip as the non-streaming
+        # path. See the inline comment there.
+        cleaned = strip_leaked_context_headers(cleaned)
         cleaned, bindings = resolve_citations(cleaned, docs)
         history.add_user_message(question)
         history.add_ai_message(cleaned)
