@@ -60,96 +60,54 @@ interface ChatMessageProps {
   onOpenSource?: (binding: ParagraphBinding) => void
 }
 
-// v0.6.0: walk markdown-rendered children, replace [N] text with
-// hover citation chips AND wrap ungrounded-sentence ranges in a
-// .ungrounded span (wavy amber underline). Recursive so it works
-// inside <strong>, <em>, list items, table cells, etc. Code blocks
-// are left alone (we avoid injecting into `code` / `pre`).
+// Walk markdown-rendered children and replace ``[N]`` text with
+// hover citation chips. Recursive so it works inside <strong>, <em>,
+// list items, table cells, etc. Code blocks are left alone (we avoid
+// injecting into `code` / `pre`).
+//
+// v0.7.4: the second pass that wrapped "ungrounded" sentences in a
+// wavy-amber underline was dropped. The signal was noisy (the auto-
+// cite threshold could miss legitimate paraphrases) and the visual
+// was distracting users. Backend still computes the bindings list;
+// we just stopped painting the negative space.
 const CITATION_PATTERN = /\[(\d{1,3})\]/g
 
-type Marker =
-  | { type: "chip"; start: number; end: number; id: number }
-  | { type: "ungrounded"; start: number; end: number; text: string }
+interface ChipMarker {
+  start: number
+  end: number
+  id: number
+}
 
 function renderWithCitations(
   children: React.ReactNode,
   bindings: Map<number, ParagraphBinding>,
-  ungroundedSentences: string[],
   onOpenSource?: (b: ParagraphBinding) => void,
-  ungroundedTooltip: string =
-    "This sentence couldn't be matched to a specific source — double-check it",
 ): React.ReactNode {
   return React.Children.map(children, (child, childIdx) => {
     if (typeof child === "string") {
-      const markers: Marker[] = []
-      // 1) chip markers
+      const markers: ChipMarker[] = []
       let m: RegExpExecArray | null
       CITATION_PATTERN.lastIndex = 0
       while ((m = CITATION_PATTERN.exec(child)) !== null) {
         markers.push({
-          type: "chip",
           start: m.index,
           end: m.index + m[0].length,
           id: parseInt(m[1], 10),
         })
       }
-      // 2) ungrounded-sentence markers. Each sentence's text is a
-      // substring of the answer; we look for it in this text node. A
-      // sentence may not span this text node (markdown chunking) — if
-      // so the indexOf returns -1 and we skip. Wrap each match.
-      for (const sentText of ungroundedSentences) {
-        if (!sentText) continue
-        let from = 0
-        while (true) {
-          const idx = child.indexOf(sentText, from)
-          if (idx === -1) break
-          markers.push({
-            type: "ungrounded",
-            start: idx,
-            end: idx + sentText.length,
-            text: sentText,
-          })
-          from = idx + sentText.length
-        }
-      }
       if (markers.length === 0) return child
-      // Sort by start; resolve same-start ties favouring ungrounded
-      // wrappers (they're outer) over chips.
-      markers.sort((a, b) =>
-        a.start - b.start || (a.type === "ungrounded" ? -1 : 1),
-      )
-      // Drop overlapping markers preferring the earlier one.
-      const kept: Marker[] = []
-      let furthest = 0
-      for (const mk of markers) {
-        if (mk.start < furthest) continue
-        kept.push(mk)
-        furthest = mk.end
-      }
       const parts: React.ReactNode[] = []
       let cursor = 0
-      for (const mk of kept) {
+      for (const mk of markers) {
         if (mk.start > cursor) parts.push(child.slice(cursor, mk.start))
-        if (mk.type === "chip") {
-          parts.push(
-            <CitationChip
-              key={`cit-${childIdx}-${mk.start}`}
-              id={mk.id}
-              binding={bindings.get(mk.id)}
-              onOpenSource={onOpenSource}
-            />,
-          )
-        } else {
-          parts.push(
-            <span
-              key={`ung-${childIdx}-${mk.start}`}
-              className="ungrounded"
-              title={ungroundedTooltip}
-            >
-              {mk.text}
-            </span>,
-          )
-        }
+        parts.push(
+          <CitationChip
+            key={`cit-${childIdx}-${mk.start}`}
+            id={mk.id}
+            binding={bindings.get(mk.id)}
+            onOpenSource={onOpenSource}
+          />,
+        )
         cursor = mk.end
       }
       if (cursor < child.length) parts.push(child.slice(cursor))
@@ -163,7 +121,7 @@ function renderWithCitations(
         return React.cloneElement(child, {
           ...props,
           children: renderWithCitations(
-            props.children, bindings, ungroundedSentences, onOpenSource, ungroundedTooltip,
+            props.children, bindings, onOpenSource,
           ),
         } as React.HTMLAttributes<HTMLElement>)
       }
@@ -255,29 +213,8 @@ export function ChatMessage({
     return text
   }, [msg.content, msg.sentenceBindings, msg.chitchat])
 
-  // v0.6.0: sentences whose binding pass returned neither a model [N]
-  // nor an auto-injected one. These are pure synthesis / connector
-  // sentences OR potentially fabricated claims -- we underline them
-  // with a wavy amber line so the user knows to verify.
-  // v0.6.1: chitchat skips ungrounded marking too; greetings don't
-  // need a "double-check this" hint.
-  const ungroundedSentences = useMemo(() => {
-    const out: string[] = []
-    if (msg.chitchat) return out
-    for (const sb of msg.sentenceBindings || []) {
-      // Skip short discourse markers ("In summary,") -- the binding
-      // pass already excluded them from auto-citation so they'd be
-      // flagged ungrounded by definition, which is too noisy.
-      if (
-        sb.citations.length === 0
-        && sb.paragraphs.length === 0
-        && sb.text.length >= 30
-      ) {
-        out.push(sb.text)
-      }
-    }
-    return out
-  }, [msg.sentenceBindings, msg.chitchat])
+  // v0.7.4: ungrounded-sentence list removed along with its wavy
+  // underline marker. See comment above renderWithCitations.
 
   const onCopy = async () => {
     try {
@@ -324,27 +261,27 @@ export function ChatMessage({
                     // renderWithCitations.
                     p: ({ node, children, ...rest }) => (
                       <p {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </p>
                     ),
                     li: ({ node, children, ...rest }) => (
                       <li {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </li>
                     ),
                     td: ({ node, children, ...rest }) => (
                       <td {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </td>
                     ),
                     th: ({ node, children, ...rest }) => (
                       <th {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </th>
                     ),
                     blockquote: ({ node, children, ...rest }) => (
                       <blockquote {...rest}>
-                        {renderWithCitations(children, bindingsById, ungroundedSentences, openSource, t("msg.ungroundedTooltip"))}
+                        {renderWithCitations(children, bindingsById, openSource)}
                       </blockquote>
                     ),
                   }}

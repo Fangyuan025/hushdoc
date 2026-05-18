@@ -4,6 +4,54 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.4] — 2026-05-17
+
+User-reported two follow-on issues post-v0.7.3:
+  1. Many factual sentences ended up with NO ``[N]`` chip at all.
+  2. Some chips pointed at the wrong source.
+
+### Removed
+- **Ungrounded-sentence wavy amber underline + tooltip.** The
+  decoration painted any sentence whose binding pass returned no
+  citation. With the tighter auto-cite gate it was throwing false
+  positives on plenty of legitimately grounded paraphrases, and
+  users found the visual distracting. CSS class, render branch,
+  ``ungroundedSentences`` memo, and the ``msg.ungroundedTooltip``
+  i18n key all gone. Backend still emits ``sentence_bindings`` — we
+  just stopped painting the negative space.
+
+### Fixed
+- **"Often no citation at all" — auto-cite gate loosened.**
+  ``resolve_citations`` defaults: ``auto_min_score`` 0.22 → 0.15,
+  ``override_margin`` 1.4 → 1.15. Paraphrases with low entity
+  overlap (the common "no chip" case) now cross the gate; the
+  override now eagerly corrects model "[1] everywhere" laziness
+  when a different chunk scores even slightly better, not only
+  when it's >40% better.
+- **"Sometimes wrong citation" — new ``model_cite_floor`` (0.05).**
+  If the model wrote ``[N]`` but ``[N]`` barely matches the
+  sentence at all (score below floor), strip that chip and fall
+  through to auto-inject. Catches the "model guessed a source"
+  failure mode. The stripped chip's leading space is also cleaned
+  so the sentence reads naturally.
+- **``_is_factual_sentence`` length floor 30 → 20.** Short
+  factoids like ``"The model has 6 layers."`` (24 chars) were
+  silently bypassing auto-cite. They now qualify.
+- **``_entities`` blocklist.** Sentence-initial words like
+  ``The`` / ``A`` / ``This`` were getting captured as "entities"
+  by the cap-word regex; any two paragraphs trivially share
+  "the", so ``entity_bonus`` was over-rewarding unrelated pairs
+  (scores around 0.35 for nonsense matches). New
+  ``_ENTITY_BLOCKLIST`` filters them after extraction. Real
+  proper nouns (``ChatGPT``, ``WMT``, ``Lin Jiang``) survive
+  because they aren't in the blocklist.
+
+End-to-end check on the Transformer paper: every test sentence
+that previously dropped its chip now gets one; ``The weather
+today is sunny [2].`` (bogus model citation) now becomes ``The
+weather today is sunny.`` cleanly instead of pretending [2] is
+the source.
+
 ## [0.7.3] — 2026-05-17
 
 Two real bugs surfaced by post-v0.7.0 use.

@@ -295,16 +295,44 @@ _ENTITY_RE = re.compile(
     r"|[一-鿿]{2,}"
 )
 
+# v0.7.4: ``The``, ``A``, ``This`` etc. are commonly sentence-initial
+# and slip through the cap-word regex as "entities". The entity_bonus
+# in _score_paragraph then over-rewards their overlap (any two
+# English paragraphs share "the") so genuinely unrelated sentences
+# scored as moderate matches. Drop these from the entity set after
+# extraction. Anything still ALL-CAPS or multi-cap-word ("ChatGPT",
+# "WMT", "Lin Jiang") survives because we lowercase AFTER the
+# regex pass.
+_ENTITY_BLOCKLIST = frozenset({
+    "the", "a", "an", "this", "that", "these", "those", "it",
+    "its", "their", "they", "we", "our", "you", "your", "i",
+    "he", "she", "him", "her",
+    # Bare verbs that begin a sentence and get capitalised too:
+    "is", "are", "was", "were", "be", "been", "being",
+    "do", "does", "did", "doing",
+    "have", "has", "had", "having",
+    "in", "on", "at", "of", "for", "to", "with", "by",
+})
+
 
 def _entities(text: str) -> set:
     """Distinctive surface tokens that should carry more weight than
     common dictionary words when scoring sentence-vs-paragraph match.
     Picks proper-noun-looking runs (capitalised), numbers, percentages,
     and Chinese 2+ char sequences. Lowercased so 'P3' matches 'p3'.
+    Common sentence-initial words ("The", "A", "This"…) are filtered
+    via ``_ENTITY_BLOCKLIST`` so their cross-paragraph "match" doesn't
+    poison the entity_bonus.
     """
     if not text:
         return set()
-    return {m.group(0).lower() for m in _ENTITY_RE.finditer(text)}
+    out: set = set()
+    for m in _ENTITY_RE.finditer(text):
+        tok = m.group(0).lower()
+        if tok in _ENTITY_BLOCKLIST:
+            continue
+        out.add(tok)
+    return out
 
 
 def _score_paragraph(sentence: str, paragraph: str) -> float:
@@ -462,10 +490,14 @@ _DISCOURSE_RE = _re_aux.compile(
 
 
 def _is_factual_sentence(text: str) -> bool:
-    """Heuristic gate before we attach an auto-citation to a sentence:
-    must be at least 30 chars and not a pure discourse marker."""
+    """Heuristic gate before we attach an auto-citation to a sentence.
+    Must be a reasonable length and not a pure discourse marker.
+
+    v0.7.4: length floor dropped 30 → 20 so short factoids like
+    ``"The model has 6 layers."`` (24 chars) become eligible. They
+    were the most common "no citation at all" complaint."""
     s = (text or "").strip()
-    if len(s) < 30:
+    if len(s) < 20:
         return False
     if _DISCOURSE_RE.match(s):
         return False
@@ -492,8 +524,9 @@ def resolve_citations(
     answer_text: str,
     kept_docs: List[Document],
     *,
-    auto_min_score: float = 0.22,
-    override_margin: float = 1.4,
+    auto_min_score: float = 0.15,
+    override_margin: float = 1.15,
+    model_cite_floor: float = 0.05,
 ) -> tuple[str, List[SentenceBinding]]:
     """v0.6.1 unified citation resolution.
 
@@ -523,6 +556,20 @@ def resolve_citations(
     chunk 1 get rewritten), and the popover always shows the paragraph
     the binding actually scored highest on -- not just the chunk's
     leading paragraph.
+
+    v0.7.4: thresholds loosened across the board because v0.7.3 users
+    reported "often no citation at all" or "wrong citation".
+    - ``auto_min_score``  0.22 → 0.15: paraphrases with low entity
+      overlap were falling below the gate. 0.15 still excludes
+      generic discourse hits.
+    - ``override_margin`` 1.4 → 1.15: model "[1] everywhere" laziness
+      now gets corrected when a different chunk scores even slightly
+      better, not only when it's >40% better.
+    - ``model_cite_floor`` (new, 0.05): if the model wrote [N] but
+      [N] barely matches at all, treat it as no citation -- the
+      model probably guessed. Falls back to auto-inject the best
+      chunk if it's above ``auto_min_score``, else drops the chip.
+      Catches the "completely wrong [N]" failure mode.
     """
     if not answer_text or not kept_docs:
         return answer_text, []
@@ -624,6 +671,19 @@ def resolve_citations(
             continue
 
         best_pid, best_para, best_score = _best_chunk_for(sent)
+
+        # v0.7.4: model_cite_floor — if the model's primary [N] doesn't
+        # match its referenced chunk at all (score below floor), strip
+        # that [N] from the sentence and fall through to the auto-
+        # inject path. Eliminates "model wrote [N] for completely
+        # unrelated source" complaints.
+        if model_ids:
+            _, _primary_score = _best_para_for(model_ids[0], sent)
+            if _primary_score < model_cite_floor:
+                # Strip ALL ``[N]`` tags + their leading space so we
+                # don't leave "... sunny ." (double-spaced period).
+                sent = re.sub(r" ?\[\d+\]", "", sent)
+                model_ids = []
 
         if model_ids:
             # Verify: how well does sentence actually match the model's

@@ -190,19 +190,10 @@
   border-radius: 0 2px 2px 0;
 }
 
-/* v0.6.0 ungrounded sentence marker. A sentence is "ungrounded" when
- * the chain's sentence-binding pass couldn't match it against any
- * cited chunk's paragraph above the auto-cite threshold. These are
- * the model's own synthesis or potentially-fabricated claims; we
- * mark them with a soft wavy underline (amber-ish, not red) so the
- * user knows "double-check this" without it screaming. */
-.ungrounded {
-  text-decoration-line: underline;
-  text-decoration-style: wavy;
-  text-decoration-color: rgba(217, 119, 6, 0.55); /* amber-600 / 55% */
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-.dark .ungrounded {
-  text-decoration-color: rgba(252, 211, 77, 0.55); /* amber-300 / 55% */
-}
+/* v0.7.4: ungrounded-sentence wavy-underline marker removed at the
+ * user's request. The signal was noisy (auto-cite threshold was
+ * already lenient + scoring is heuristic, so plenty of legitimately
+ * grounded sentences were getting flagged) and the visual was
+ * distracting. The backend still computes sentence_bindings and
+ * the inline [N] chips still render where citations exist; we just
+ * no longer paint the "this sentence has no chip" decoration. */

@@ -71,8 +71,6 @@ const EN = {
   "msg.send": "Send",
   "msg.prevVariant": "Previous answer",
   "msg.nextVariant": "Next answer",
-  "msg.ungroundedTooltip":
-    "This sentence couldn't be matched to a specific source — double-check it",
   "msg.micRecording": "Recording — click or pause for 1.5 s to stop",
   "msg.micIdle": "Push-to-talk (voice mode is on)",
   "msg.micTranscribing": "Transcribing…",
@@ -240,8 +238,6 @@ const ZH: Dict = {
   "msg.send": "发送",
   "msg.prevVariant": "上一个回答",
   "msg.nextVariant": "下一个回答",
-  "msg.ungroundedTooltip":
-    "这句话找不到具体出处 —— 请人工核对",
   "msg.micRecording": "录音中 —— 点击或停顿 1.5 秒结束",
   "msg.micIdle": "按住说话(语音模式已开)",
   "msg.micTranscribing": "转写中…",
