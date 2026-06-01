@@ -1166,6 +1166,48 @@ async def _start_watchdog() -> None:
         asyncio.create_task(_heartbeat_watchdog())
 
 
+# ---------------------------------------------------------------------------
+# v0.7.8: model pre-warm on startup.
+#
+# Previously llama-server was spawned lazily on the user's FIRST chat turn,
+# so that turn ate the full model-load cost (~15-25 s cold). We now kick off
+# the spawn + a tiny warmup completion in a background daemon thread the
+# moment the backend boots, during the otherwise-idle window before the user
+# asks anything. By the time they send their first question the model is
+# usually already hot.
+#
+# Runs in a thread (not the event loop) because get_chain() -> _ensure_
+# llama_server() BLOCKS until /health is 200 (model fully loaded), which would
+# otherwise stall uvicorn startup. Failures are non-fatal: if warmup can't
+# complete (no GPU, model missing, etc.) the first real query just pays the
+# cost as before. Gated by HUSHDOC_PREWARM=0 for CI / smoke runs that don't
+# want a GPU spin-up.
+# ---------------------------------------------------------------------------
+_PREWARM_ENABLED = os.environ.get("HUSHDOC_PREWARM", "1") not in ("0", "false", "False")
+
+
+def _prewarm_model() -> None:
+    try:
+        import llama_server
+        logger.info("Pre-warming model (background)...")
+        # Build the chain; this constructs the ChatOpenAI client. The actual
+        # llama-server spawn happens when the chain first touches it, so we
+        # also force the shared server up + fire a 1-token warmup completion.
+        deps.get_chain()
+        server = llama_server.get_shared_server()  # spawn + block until loaded
+        server.warm_up()
+        logger.info("Model pre-warm complete.")
+    except Exception:
+        logger.exception("Model pre-warm failed (first query will load lazily).")
+
+
+@app.on_event("startup")
+async def _start_prewarm() -> None:
+    if _PREWARM_ENABLED:
+        threading.Thread(target=_prewarm_model, name="hushdoc-prewarm",
+                         daemon=True).start()
+
+
 @app.on_event("startup")
 async def _apply_persisted_config() -> None:
     """Pull the user's saved model_path out of hushdoc_config.json (if

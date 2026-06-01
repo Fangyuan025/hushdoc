@@ -4,6 +4,37 @@ All notable user-visible changes to Hushdoc. This project follows
 [Semantic Versioning](https://semver.org). 0.x means breaking changes can
 land between minor versions while we converge on 1.0.
 
+## [0.7.8] — 2026-05-31
+
+Process-lifetime + cold-start fixes surfaced during an end-to-end test
+pass. Two issues, both verified fixed:
+
+### Fixed
+- **`llama-server` no longer orphans when the backend dies abnormally.**
+  Previously the child was spawned with `DETACHED_PROCESS` (so it
+  deliberately survived parent death) and cleanup relied solely on
+  `atexit`, which never runs on a hard kill (`taskkill /F`, crash, OOM).
+  Result: every abnormal exit leaked a multi-GB `llama-server.exe`. Now
+  the child's lifetime is bound to the backend at the OS level:
+  - **Windows:** a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`;
+    when the backend process dies for *any* reason the OS terminates
+    every process in the job.
+  - **Linux:** `prctl(PR_SET_PDEATHSIG, SIGKILL)` so the kernel kills the
+    child the instant the parent thread dies.
+  - The old "no shared console" behaviour is preserved via
+    `CREATE_NO_WINDOW` (which does not detach the lifetime).
+  Verified: `taskkill /F` on the backend terminates `llama-server`
+  within ~1.5 s; orphan count goes to 0.
+
+- **First question is no longer slow — model pre-warms at startup.**
+  `llama-server` used to spawn lazily on the user's *first* chat turn,
+  so that turn ate the full model-load cost (~17 s cold). The backend now
+  spawns the server and fires a 1-token warmup completion in a background
+  daemon thread the moment it boots, during the idle window before the
+  user asks anything. Verified: with pre-warm, the first real question
+  returns in ~4.7 s (warm) instead of ~17 s. Disable with
+  `HUSHDOC_PREWARM=0` (e.g. for CI / GPU-less smoke runs).
+
 ## [0.7.7] — 2026-05-17
 
 User-reported: assistant replies in Chinese mode were rendering as
